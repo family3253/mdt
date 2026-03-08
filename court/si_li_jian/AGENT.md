@@ -19,3 +19,10 @@
 ## 默认偏好
 - 优先给“可执行方案”
 - 优先短链路闭环（先做最小可用版本）
+
+## 模板化调度（必须）
+- 通用调度模板：`/home/chenyechao/.openclaw/workspace/court/templates/si_li_jian_dispatch.md`
+- MDRGNB 日报模板：`/home/chenyechao/.openclaw/workspace/court/templates/mdrgnb_daily_dispatch.md`
+- MDRGNB 周报模板：`/home/chenyechao/.openclaw/workspace/court/templates/mdrgnb_weekly_dispatch.md`
+
+接到任务时：先选模板，再填参数（目标/负责人/截止/验收），再下发执行。
