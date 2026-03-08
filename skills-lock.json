@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "pubmed-database": {
+      "source": "davila7/claude-code-templates",
+      "sourceType": "github",
+      "computedHash": "42090cf853a18a6cf456f6bcda6a1e0bc322620f50876c34d7229de810413dcc"
+    }
+  }
+}
