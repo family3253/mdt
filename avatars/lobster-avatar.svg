@@ -1,53 +1,52 @@
-<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" fill="none">
   <defs>
     <linearGradient id="bg" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#0B1220"/>
-      <stop offset="1" stop-color="#1E2A44"/>
+      <stop stop-color="#0A0F1F"/>
+      <stop offset="1" stop-color="#182B56"/>
     </linearGradient>
-    <linearGradient id="shell" x1="180" y1="110" x2="342" y2="360" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FF7A59"/>
-      <stop offset="1" stop-color="#FF4D3A"/>
+    <linearGradient id="metal" x1="192" y1="116" x2="320" y2="370" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E9F1FF"/>
+      <stop offset="1" stop-color="#AEBFDB"/>
     </linearGradient>
-    <linearGradient id="claw" x1="120" y1="160" x2="392" y2="260" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FF9B6A"/>
-      <stop offset="1" stop-color="#FF5A45"/>
+    <linearGradient id="red" x1="156" y1="162" x2="352" y2="336" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF5A5A"/>
+      <stop offset="1" stop-color="#D8263A"/>
     </linearGradient>
-    <filter id="glow" x="0" y="0" width="512" height="512" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feGaussianBlur stdDeviation="12"/>
-    </filter>
+    <linearGradient id="cyan" x1="220" y1="248" x2="292" y2="304" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8CF2FF"/>
+      <stop offset="1" stop-color="#31CFFF"/>
+    </linearGradient>
   </defs>
 
-  <rect x="32" y="32" width="448" height="448" rx="120" fill="url(#bg)"/>
-  <circle cx="256" cy="256" r="170" fill="#68E1FD" opacity="0.12" filter="url(#glow)"/>
+  <rect x="32" y="32" width="448" height="448" rx="118" fill="url(#bg)"/>
 
-  <!-- Claws -->
-  <path d="M112 212C112 170 142 150 174 154C157 172 154 198 166 214C146 230 124 234 112 212Z" fill="url(#claw)"/>
-  <path d="M400 212C400 170 370 150 338 154C355 172 358 198 346 214C366 230 388 234 400 212Z" fill="url(#claw)"/>
+  <!-- Glow ring -->
+  <circle cx="256" cy="256" r="166" stroke="#6FD8FF" stroke-opacity="0.22" stroke-width="18"/>
 
-  <!-- Arms -->
-  <path d="M172 216C186 206 208 206 224 216" stroke="#FF8A63" stroke-width="16" stroke-linecap="round"/>
-  <path d="M340 216C326 206 304 206 288 216" stroke="#FF8A63" stroke-width="16" stroke-linecap="round"/>
+  <!-- Helmet silhouette -->
+  <path d="M256 106C189 106 152 157 152 226V274C152 344 196 406 256 406C316 406 360 344 360 274V226C360 157 323 106 256 106Z" fill="url(#metal)"/>
 
-  <!-- Body -->
-  <ellipse cx="256" cy="278" rx="98" ry="112" fill="url(#shell)"/>
-  <path d="M256 166C212 166 178 204 178 252V290C178 338 212 390 256 390C300 390 334 338 334 290V252C334 204 300 166 256 166Z" stroke="#FFB29D" stroke-opacity="0.45" stroke-width="6"/>
+  <!-- Red facial/armor lines -->
+  <path d="M190 188C206 164 229 150 256 150C283 150 306 164 322 188L294 208C284 194 271 186 256 186C241 186 228 194 218 208L190 188Z" fill="url(#red)"/>
+  <path d="M210 318C226 334 241 342 256 342C271 342 286 334 302 318L328 334C306 360 282 374 256 374C230 374 206 360 184 334L210 318Z" fill="url(#red)"/>
+  <path d="M168 258L206 236V290L168 308V258Z" fill="url(#red)"/>
+  <path d="M344 258L306 236V290L344 308V258Z" fill="url(#red)"/>
 
-  <!-- Head ridge -->
-  <path d="M214 186C226 174 242 168 256 168C270 168 286 174 298 186" stroke="#FFD5C9" stroke-opacity="0.55" stroke-width="6" stroke-linecap="round"/>
+  <!-- Eye frames -->
+  <path d="M186 236C198 216 218 206 236 210C227 232 227 253 236 274C214 278 196 268 186 236Z" fill="#D9F9FF"/>
+  <path d="M326 236C314 216 294 206 276 210C285 232 285 253 276 274C298 278 316 268 326 236Z" fill="#D9F9FF"/>
+  <path d="M194 240C204 226 217 221 228 223C222 238 222 249 228 263C214 266 201 260 194 240Z" fill="#91F0FF"/>
+  <path d="M318 240C308 226 295 221 284 223C290 238 290 249 284 263C298 266 311 260 318 240Z" fill="#91F0FF"/>
 
-  <!-- Eyes -->
-  <circle cx="224" cy="246" r="18" fill="#0D172A"/>
-  <circle cx="288" cy="246" r="18" fill="#0D172A"/>
-  <circle cx="230" cy="240" r="5" fill="#DDF7FF"/>
-  <circle cx="294" cy="240" r="5" fill="#DDF7FF"/>
+  <!-- Center crystal -->
+  <path d="M256 246L276 272L256 298L236 272L256 246Z" fill="url(#cyan)" stroke="#C8FBFF" stroke-width="4"/>
 
-  <!-- Mouth -->
-  <path d="M228 300C238 314 274 314 284 300" stroke="#0D172A" stroke-width="8" stroke-linecap="round"/>
+  <!-- Mouth line -->
+  <path d="M226 318H286" stroke="#5D6F8F" stroke-width="7" stroke-linecap="round"/>
 
-  <!-- Accent dots -->
-  <circle cx="196" cy="286" r="6" fill="#FFD9CB" opacity="0.8"/>
-  <circle cx="316" cy="286" r="6" fill="#FFD9CB" opacity="0.8"/>
+  <!-- Lobster subtle hint: tiny antenna crest -->
+  <path d="M238 128L226 108" stroke="#FF8B8B" stroke-width="5" stroke-linecap="round"/>
+  <path d="M274 128L286 108" stroke="#FF8B8B" stroke-width="5" stroke-linecap="round"/>
 
-  <!-- Signature -->
-  <text x="256" y="438" text-anchor="middle" fill="#9AD7FF" font-family="Inter, system-ui, sans-serif" font-size="28" font-weight="700">龙虾弟</text>
+  <text x="256" y="438" text-anchor="middle" fill="#A9DFFF" font-family="Inter, system-ui, sans-serif" font-size="24" font-weight="700">龙虾弟 · 光之形态</text>
 </svg>
