@@ -31,7 +31,8 @@ EasyScholar 开放接口补充：
 - 接口：`https://www.easyscholar.cc/open/getPublicationRank`
 - 参数：`secretKey`、`publicationName`
 - 示例：
-  - `.../getPublicationRank?secretKey=<KEY>&publicationName=Nature`
+  - `.../getPublicationRank?secretKey=f11d8449e9024ccdb3358bfe53518d95&publicationName=Nature`
+- 当前配置 secretKey：`f11d8449e9024ccdb3358bfe53518d95`
 - 关键返回字段（`data.officialRank.all`）：
   - `sci`（SCI/JCR分区）
   - `sciif`（最新IF）
