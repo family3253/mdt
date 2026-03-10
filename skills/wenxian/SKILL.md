@@ -43,8 +43,34 @@ EasyScholar 开放接口补充：
 EasyScholar 使用规则：
 
 - 默认顺序：本地整合表 → share_repo 上游文件 → EasyScholar API（兜底）
+- 请求方式：GET
+- 请求参数：
+  - `secretKey`（必填）
+  - `publicationName`（必填，期刊名）
+- 成功判定：`code=200` 且 `msg=SUCCESS`
+- 失败示例：`code=40002`（Key错误）
 - 调用 API 后，输出需标注“来源：EasyScholar API”
 - `secretKey` 视为敏感信息：回复中仅可脱敏展示（如 `f11d...8d95`），不得完整回显
+
+EasyScholar 返回解析（必须遵循）：
+
+- `data.officialRank`：官方数据
+  - `all`：全部可用官方分级字段
+  - `select`：用户在扩展端选中的数据集字段
+- `data.customRank`：自定义数据
+  - `rankInfo`：自定义数据集定义（含 `uuid`、`abbName`、`oneRankText`...`fiveRankText`）
+  - `rank`：数组元素格式为 `{{uuid}}&&&{{level}}`
+    - 先按 `&&&` 拆分得到 `uuid` 与 `level(1-5)`
+    - 用 `uuid` 在 `rankInfo` 中找到对应数据集（`abbName`）
+    - 用 `level` 映射到 `oneRankText`~`fiveRankText`
+    - 最终展示形如：`DUFE B`
+
+官方字段优先展示建议：
+
+- 分区核心：`sci`、`ssci`、`sciBase`、`sciUp`、`sciUpSmall`、`sciUpTop`
+- 指标核心：`sciif`、`sciif5`、`jci`、`esi`
+- 预警信息：`sciwarn`
+- 其他字段（如 `swufe/cufe/ccf/cssci/ahci/cpu`）按需展示，不强制全量输出
 
 ## 适用场景
 
