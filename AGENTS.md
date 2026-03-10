@@ -224,6 +224,26 @@ Think of it like a human reviewing their journal and updating their mental model
 
 The goal: Be helpful without being annoying. Check in a few times a day, do useful background work, but respect quiet time.
 
+## Context Hygiene Protocol (default)
+
+为避免上下文膨胀，默认执行以下规则：
+
+1. **大文件先摘要后继续**
+   - 读取大文件后，先把关键要点写入本地摘要文件（例如 `memory/context-notes.md` 或任务目录下 `summary.md`）。
+   - 后续对话优先引用摘要，不在 Prompt 中反复携带原文。
+
+2. **检索记忆先过滤再带入**
+   - 调用大模型前，先做 memory 检索（如 `openclaw memory search` / 相关索引检索）。
+   - 仅带入与当前任务最相关的背景，目标总长度 **<= 1000 字**。
+
+3. **长任务结束主动翻篇**
+   - 长任务完成后，先生成“任务总结”写盘（目标、结论、关键决策、后续待办）。
+   - 新任务默认在干净上下文启动；必要时主动 reset session，避免旧任务污染。
+
+4. **默认少量高相关上下文**
+   - 宁可少带、精准带，不做“全家桶”历史塞入。
+   - 发现上下文开始冗余时，优先压缩为结构化摘要再继续。
+
 ## Make It Yours
 
 This is a starting point. Add your own conventions, style, and rules as you figure out what works.
