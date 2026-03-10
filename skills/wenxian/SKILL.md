@@ -42,7 +42,7 @@ EasyScholar 开放接口补充：
 
 EasyScholar 使用规则：
 
-- 默认顺序：本地整合表 → share_repo 上游文件 → EasyScholar API（兜底）
+- 默认顺序：EasyScholar API → 本地整合表 → share_repo 上游文件（补充校验）
 - 请求方式：GET
 - 请求参数：
   - `secretKey`（必填）
@@ -70,7 +70,16 @@ EasyScholar 返回解析（必须遵循）：
 - 分区核心：`sci`、`ssci`、`sciBase`、`sciUp`、`sciUpSmall`、`sciUpTop`
 - 指标核心：`sciif`、`sciif5`、`jci`、`esi`
 - 预警信息：`sciwarn`
-- 其他字段（如 `swufe/cufe/ccf/cssci/ahci/cpu`）按需展示，不强制全量输出
+- 中国药科大学分级：`cpu`（默认展示）
+- 其他字段（如 `swufe/cufe/ccf/cssci/ahci`）按需展示，不强制全量输出
+
+分区展示策略（必须执行）：
+
+- 优先展示“最新口径”：以 EasyScholar 返回为主。
+- 同时给出“最高分区”汇总：
+  - 中科院：在 `sciBase/sciUp/sciUpSmall/sciUpTop` 中取最优结果并标注来源字段。
+  - SCI/JCR：在 `sci/ssci` 中取最优 Q 区结果（Q1 最高）。
+- 若多来源冲突，保留冲突说明，不静默覆盖。
 
 ## 适用场景
 
@@ -155,8 +164,9 @@ EasyScholar 返回解析（必须遵循）：
   - 期刊名（Journal）
   - PMID
   - 链接
-  - 中科院分区（大类/小类；查不到写“待核实”）
-  - SCI 分区（Q1/Q2/Q3/Q4；查不到写“待核实”）
+  - 中科院分区（最新口径 + 最高分区；查不到写“待核实”）
+  - SCI/JCR 分区（最新口径 + 最高分区；查不到写“待核实”）
+  - 中国药科大学分级（CPU）
   - 80-120字中文摘要
   - 一句话临床/研究价值
   - 10问要点（1-10）
