@@ -1,5 +1,5 @@
 ---
-name: auto-pool-maintainer
+name: cpaclean
 description: 维护 CLIProxyAPI 号池。用于“号池维护/补号/剔除无效账号/每天定时维护/candidates 阈值维护”等请求。基于 auto_pool_maintainer.py 执行清理401、补号、收敛。
 ---
 
