@@ -16,15 +16,18 @@
 4\. 删除完全过期的临时信息
 5\. 更新 `lastMemoryMaintenance` 为当前日期
 
-\## Telegram 不回复自动修复（每次 heartbeat 执行）
+\## 全渠道不回复自动修复（每次 heartbeat 执行）
 
 目标：自动发现“收到消息但不回复/明显卡住”的高概率状态，并自愈。
+
+适用范围：除 Telegram 外，所有已启用对话渠道（webchat/discord/qqbot/feishu/wecom 等）。
 
 执行步骤：
 
 1\. 运行 `openclaw status`，重点看：
-- Telegram 对应 direct session token 占比是否 >= 75%
-- 是否出现 gateway timeout / delivery timeout 迹象
+- 各渠道 direct/group session token 占比是否 >= 75%
+- 是否出现 gateway timeout / delivery timeout / announce timeout 迹象
+- 是否存在 channel state 非 OK
 
 2\. 若命中异常：
 - 先执行 `openclaw sessions cleanup`
@@ -32,9 +35,10 @@
 - 重启后等待 8-12 秒，再执行一次 `openclaw status` 复检
 
 3\. 将处理结果写入 `memory/heartbeat-state.json`：
-- `lastTelegramAutoFixAt`
-- `lastTelegramAutoFixReason`
-- `lastTelegramAutoFixResult`
+- `lastGlobalAutoFixAt`
+- `lastGlobalAutoFixReason`
+- `lastGlobalAutoFixResult`
+- `lastGlobalAutoFixChannels`
 
 4\. 冷却机制：
 - 2 小时内最多自动修复 1 次；命中冷却期则只记录，不重复重启
