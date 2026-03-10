@@ -1,42 +1,165 @@
 ---
 name: wenxian
-description: 基于本地与上游仓库期刊分区表进行检索与分区查询。用于“查中科院分区、查JCR分区、查SCI分区、按期刊名匹配分区、对比2024/2025分区变化、同步share_repo JCR数据”等请求。
+description: 固化“检索文献并定时推送”的工作流技能。用于把 MDRGNB/HCC 等主题做成每天自动检索 + 结构化总结 + 多渠道推送（飞书/企业微信/QQ/Telegram）的 cron 任务；支持字段标准化（期刊名、中科院分区、SCI 分区）、多端内容一致、长文分段防丢。触发示例："帮我几点几分往xx里推送xx文献"、"每天xx:xx推送xx主题文献到xx渠道"。
 ---
 
-# wenxian
+# 检索文献并推送（Cron Skill，多渠道版）
 
-使用本技能时，优先基于本地整合表检索：
+## 目标
+
+把“检索文献→生成摘要→定时推送”固定为可复用流水线，而不是一次性临时任务。
+
+## 分区数据源（本地固化）
+
+优先使用本地整合表：
 
 - `references/JCR2024_FQBJCR2025_merged.csv`：整合 2024 JCR 与 2025 中科院分区（同名期刊对齐，保留双方原始字段）
 
-必要时可回看源表：
+必要时回看源表：
+
 - `references/FQBJCR2025.csv`：中科院分区（含大类/小类分区、Top、是否OA、WoS索引等）
 - `references/JCR2024.csv`：JCR IF、IF Quartile、IF Rank（可作为 SCI/JCR 分区参考）
 
 上游补充来源：
-- GitHub: `https://github.com/yongqianxiao/share_repo/tree/master/JCR`
+
+- GitHub：`https://github.com/yongqianxiao/share_repo/tree/master/JCR`
 - 本地清单：`references/upstream/share_repo_JCR_manifest.txt`
 - 同步脚本：`scripts/sync_share_repo_jcr.sh`（将上游 `JCR/` 拉取到 `references/upstream_raw/`）
 
-## 执行规则
+## 适用场景
 
-1. 先按期刊名精确匹配；未命中时再做大小写无关和去标点模糊匹配。
-2. 用户说“中科院分区”时，优先返回 `FQBJCR2025.csv` 结果。
-3. 用户说“SCI分区/JCR分区”时，优先返回 `JCR2024.csv` 的 `IF Quartile(2024)` 与 `IF Rank(2024)`。
-4. 同一期刊在两表都有记录时，默认同时给出两套结果并标注年份来源（2024/2025）。
-5. 结果输出尽量结构化：
-   - 期刊名
-   - 中科院大类/分区、Top（若有）
-   - JCR IF、Q区、排名（若有）
-   - 数据来源文件与年份
+- 用户说“参考 MDRGNB 标准，做某主题日报/周报”
+- 用户用自然语言下发："帮我几点几分往xx里面推送xx的文献"
+- 用户要求“每天 xx:xx 推送到 飞书/企业微信/QQ/Telegram”
+- 用户要求增加字段：期刊名、中科院分区、SCI 分区
+- 用户反馈“任务显示 delivered 但收不到全文”
 
-## 批量查询
+## 标准流程（必须按顺序）
 
-- 支持多期刊批量匹配，输出表格或清单。
-- 期刊名冲突或疑似同名时，附带 ISSN/eISSN 辅助核对。
+1. 确认参数
+   - 主题（如 MDRGNB、肝癌/HCC）
+   - 频率（每天/每周）和时区（默认 Asia/Shanghai）
+   - 推送渠道与目标 ID（feishu/wecom/qqbot/telegram）
+   - 输出模板（日报/周报）
 
-## 说明
+2. 创建/更新 cron 任务
+   - `sessionTarget: "isolated"`
+   - `payload.kind: "agentTurn"`
+   - `timeoutSeconds: 1200`（默认）
 
-- 本技能默认以本地整合表为准。
-- 用户要求“补最新分区/同步上游JCR仓库”时，先运行：`bash scripts/sync_share_repo_jcr.sh`。
-- 同步后优先从 `references/upstream_raw/` 读取对应年度文件，再与本地整合表交叉校验并标注差异。
+3. 三阶段流水线（借鉴 daily-paper-skills）
+   - Phase A（Fetch）：检索 PubMed + 初筛去重
+   - Phase B（Review）：生成结构化 TopN、10问、四维评分、证据等级
+   - Phase C（Deliver）：按渠道规则推送并记录发送结果
+
+4. 固化“检索 + 输出结构”
+   - 检索源：PubMed（默认）
+   - 必须把用户口语主题“xx文献”自动扩展为可执行 PubMed 检索式（布尔逻辑 + 同义词 + 缩写）
+   - 时间窗：默认近24小时（日报）或近7天（补位/周报）
+   - TopN：默认 Top3（不足按实际）
+   - 建议保留历史去重文件（如 `.history.json` 或 topic_history.json），避免连续多天重复推送同一篇
+
+5. 固化“推送可靠性”
+   - 在 payload prompt 中要求使用 `message` 工具主动发送
+   - 企业微信长文必须 2-3 段分发（每段 <=1200 字）
+   - 飞书/QQ/Telegram 默认可单条发送；若正文超长，同样改为分段
+   - 分段标记：`第1/3段`、`第2/3段`、`第3/3段`
+   - 若 payload 内已经显式 `message.send`，则 cron `delivery.mode` 设为 `none`
+
+6. 验证
+   - `cron.run` 手动触发一次
+   - `cron.runs` 检查 `status` 与 `deliveryStatus`
+   - 用户确认是否在目标端可见全文
+
+## PubMed 检索式拓展规则（必须执行）
+
+当用户说“推送xx文献”时，不把“xx”原样直搜，先做检索式拓展：
+
+1. 主题归一化：中文主题转英文医学主题词（必要时补 MeSH）。
+2. 同义词扩展：加入常见别名/缩写/全称（OR 连接）。
+3. 疾病+场景约束：必要时加入研究场景词（如 resistance、therapy、prognosis）。
+4. 时间约束：日报默认近24小时；周报默认近7天。
+5. 结果质量优先：优先临床相关和证据等级更高文献。
+
+检索式结构示例：
+- `(主主题同义词1 OR 同义词2 OR 缩写) AND (研究场景词1 OR 场景词2)`
+
+输出时需在首段附一行“本次检索式：...”。
+
+## 强化规则（从 dailypaper 流水线迁移）
+
+1. 最低数量补位
+   - 当日高质量新增不足 TopN（默认3）时，自动从近7天窗口补位，直到凑满 TopN 或候选耗尽。
+   - 补位文献必须与当日已选不重复。
+
+2. 质量优先排序
+   - 候选排序优先级：证据等级 > 临床相关性 > 方法创新度 > 新近性。
+   - 同分时优先期刊分区更高者（SCI/Q 与中科院分区综合判断）。
+
+3. 历史回填与防断更
+   - 若某天检索结果极少，允许从历史候选池回填，保证日报不断更。
+   - 回填文献要显式标注“回填/补位”，避免与“当日新增”混淆。
+
+## 推荐输出模板（MDRGNB/HCC 通用）
+
+- 今日新增数量
+- Top3（不足3篇按实际）
+- 每篇包含：
+  - 标题
+  - 期刊名（Journal）
+  - PMID
+  - 链接
+  - 中科院分区（大类/小类；查不到写“待核实”）
+  - SCI 分区（Q1/Q2/Q3/Q4；查不到写“待核实”）
+  - 80-120字中文摘要
+  - 一句话临床/研究价值
+  - 10问要点（1-10）
+  - 四维评分（工程应用价值/架构创新/理论贡献/结果可靠性，1-10）+ 总评
+  - 证据等级（Meta/RCT/观察/体外/综述/其他）
+- 今日结论
+- 明日建议（1-2条）
+
+## 渠道映射（默认）
+
+- 飞书：`channel=feishu`，`target=chat:<chatId>` 或 `user:<openId>`
+- 企业微信：`channel=wecom`，`target=<userId|groupId>`
+- QQ：`channel=qqbot`，`target=qqbot:c2c:<openid>` 或 `qqbot:group:<groupid>`
+- Telegram：`channel=telegram`，`target=<chat_id>`
+
+## Cron 模板（多渠道通用）
+
+```json
+{
+  "action": "add",
+  "job": {
+    "name": "daily-<topic>-wecom-<HHMM>",
+    "schedule": { "kind": "cron", "expr": "<m> <h> * * *", "tz": "Asia/Shanghai" },
+    "sessionTarget": "isolated",
+    "wakeMode": "now",
+    "payload": {
+      "kind": "agentTurn",
+      "model": "openai-codex/gpt-5.3-codex",
+      "timeoutSeconds": 1200,
+      "message": "先检索文献并生成结构化快报，再使用 message 工具发送到指定渠道/目标（channel=<feishu|wecom|qqbot|telegram>, target=<ID>）。若正文过长则按2-3段发送（每段<=1200字），最后仅输出固定完成语。"
+    },
+    "delivery": { "mode": "none" }
+  }
+}
+```
+
+## 故障处理
+
+- 现象：`delivered` 但用户看不到全文
+  - 强制改为 payload 内 `message.send` 分段发送
+  - 先发一条短测试消息验证 target 可达
+  - 再 `cron.run` 复测全文
+
+- 现象：QQ 与企业微信内容不一致
+  - 使用同一“内容生成模板”，仅替换 `channel/target`
+
+## 约束
+
+- 不得只输出单个占位词（如 `mdrgnb`）
+- 分区信息不确定时必须标 `待核实`，不得臆造
+- 10问要点、四维评分、证据等级为固定输出项，不得省略
+- 用户要求“保持一致”时，QQ 与企业微信正文结构必须一致
