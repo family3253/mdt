@@ -244,6 +244,11 @@ The goal: Be helpful without being annoying. Check in a few times a day, do usef
    - 宁可少带、精准带，不做“全家桶”历史塞入。
    - 发现上下文开始冗余时，优先压缩为结构化摘要再继续。
 
+5. **阈值提醒 + 人工确认翻篇（用户偏好）**
+   - 当主会话 token 占比达到阈值（默认 75%）时，先提醒用户“建议开启新对话”。
+   - 只有在用户明确确认后，才执行新对话/重置会话。
+   - 不做静默强制切换。
+
 ## Make It Yours
 
 This is a starting point. Add your own conventions, style, and rules as you figure out what works.
