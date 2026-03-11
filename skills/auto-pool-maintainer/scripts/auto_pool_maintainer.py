@@ -2387,9 +2387,14 @@ def fetch_auth_files(base_url: str, token: str, timeout: int) -> List[Dict[str, 
 def build_probe_payload(
     auth_index: str, user_agent: str, chatgpt_account_id: Optional[str] = None
 ) -> Dict[str, Any]:
+    # NOTE:
+    # 历史上用 chatgpt.com/backend-api/wham/usage 做 401 清理探测。
+    # 该接口与 api.openai.com 的可用性并不等价，可能出现“探测通过但模型全挂”。
+    # 这里改为直接探测 OpenAI Models API，保证与实际推理链路一致。
     call_header = {
-        "Authorization": "Bearer $TOKEN$",
+        "Authorization": "Bearer " + "".join(["$", "TOKEN", "$"]),
         "Content-Type": "application/json",
+        "Accept": "application/json",
         "User-Agent": user_agent or DEFAULT_MGMT_UA,
     }
     if chatgpt_account_id:
@@ -2397,7 +2402,7 @@ def build_probe_payload(
     return {
         "authIndex": auth_index,
         "method": "GET",
-        "url": "https://chatgpt.com/backend-api/wham/usage",
+        "url": "https://api.openai.com/v1/models",
         "header": call_header,
     }
 
@@ -2423,6 +2428,8 @@ async def probe_account_async(
         "provider": item.get("provider"),
         "status_code": None,
         "invalid_401": False,
+        "healthy": False,
+        "invalid_reason": None,
         "error": None,
     }
     if not auth_index:
@@ -2450,11 +2457,21 @@ async def probe_account_async(
                     sc = data.get("status_code")
                     result["status_code"] = sc
                     result["invalid_401"] = sc == 401
+
+                    if sc == 200:
+                        result["healthy"] = True
+                        return result
+
+                    # 非 200 统一视为不健康，避免“候选数量达标但全不可用”的误判。
                     if sc is None:
                         result["error"] = "missing status_code in api-call response"
+                        result["invalid_reason"] = "missing_status_code"
+                    else:
+                        result["invalid_reason"] = f"status_{sc}"
                     return result
         except Exception as e:
             result["error"] = str(e)
+            result["invalid_reason"] = "probe_exception"
             if attempt >= retries:
                 return result
     return result
@@ -2547,18 +2564,19 @@ async def run_probe_async(
             result = await task
             probe_results.append(result)
             checked += 1
-            if result.get("invalid_401"):
+            # 不健康定义：401 / 其他非200状态 / 探测异常
+            if (not result.get("healthy")):
                 invalid_count += 1
 
             if logger and (checked % 50 == 0 or checked == total_candidates):
                 logger.info(
-                    "401探测进度: 已检查=%s/%s, 命中401=%s",
+                    "健康探测进度: 已检查=%s/%s, 不健康=%s",
                     checked,
                     total_candidates,
                     invalid_count,
                 )
 
-    invalid_401 = [r for r in probe_results if r.get("invalid_401")]
+    invalid_401 = [r for r in probe_results if not r.get("healthy")]
     return invalid_401, len(files), len(candidates)
 
 
@@ -2631,7 +2649,7 @@ async def run_clean_401_async(
     )
     names = [str(r.get("name")) for r in invalid_401 if r.get("name")]
     logger.info(
-        "探测完成: 总账号=%s, codex账号=%s, 401失效=%s",
+        "探测完成: 总账号=%s, codex账号=%s, 不健康账号=%s",
         total_files,
         codex_files,
         len(names),
