@@ -1,0 +1,23 @@
+{
+  "lastChecks": {},
+  "lastMemoryMaintenance": "2026-03-08",
+  "lastGlobalAutoFixAt": "2026-03-11T11:31:00+08:00",
+  "lastGlobalAutoFixReason": "openclaw status gateway timeout after 10000ms during heartbeat check",
+  "lastGlobalAutoFixResult": "sessions cleanup + gateway restart + status recheck recovered",
+  "lastGlobalAutoFixChannels": [
+    "webchat",
+    "discord",
+    "qqbot",
+    "feishu",
+    "wecom"
+  ],
+  "lastGlobalHeartbeatCheckAt": "2026-03-11T20:43:00+08:00",
+  "lastGlobalHeartbeatCheckResult": "status checked; non-telegram channels normal (no timeout/channel-state anomalies observed); no autofix triggered",
+  "lastGlobalHeartbeatCheckChannels": [
+    "webchat",
+    "discord",
+    "qqbot",
+    "feishu",
+    "wecom"
+  ]
+}
