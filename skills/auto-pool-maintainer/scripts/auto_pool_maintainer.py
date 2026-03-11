@@ -2524,7 +2524,41 @@ async def probe_account_async(
                         result["healthy"] = True
                         return result
 
-                    # 非 200 统一视为不健康，避免“候选数量达标但全不可用”的误判。
+                    # 若 models 探测非 200，再补做一次 responses 探测；
+                    # 只要 API 可用就视为健康，避免误删“可跑 API”的账号。
+                    try:
+                        resp_payload = {
+                            "authIndex": str(auth_index),
+                            "method": "POST",
+                            "url": "https://api.openai.com/v1/responses",
+                            "header": {
+                                "Authorization": "Bearer " + "".join(["$", "TOKEN", "$"]),
+                                "Content-Type": "application/json",
+                                "Accept": "application/json",
+                                "User-Agent": user_agent or DEFAULT_MGMT_UA,
+                            },
+                            "data": json.dumps({"model": "gpt-5.4", "input": "ping", "max_output_tokens": 8}),
+                        }
+                        if chatgpt_account_id:
+                            resp_payload["header"]["Chatgpt-Account-Id"] = chatgpt_account_id
+                        async with semaphore:
+                            async with session.post(
+                                f"{base_url}/v0/management/api-call",
+                                headers={**mgmt_headers(token), "Content-Type": "application/json"},
+                                json=resp_payload,
+                                timeout=timeout,
+                            ) as resp2:
+                                t2 = await resp2.text()
+                                d2 = safe_json_text(t2)
+                                sc2 = d2.get("status_code") if isinstance(d2, dict) else None
+                                if sc2 == 200:
+                                    result["healthy"] = True
+                                    result["invalid_reason"] = None
+                                    result["error"] = None
+                                    return result
+                    except Exception:
+                        pass
+
                     if sc is None:
                         result["error"] = "missing status_code in api-call response"
                         result["invalid_reason"] = "missing_status_code"
