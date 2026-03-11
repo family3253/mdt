@@ -11,8 +11,8 @@
     "feishu",
     "wecom"
   ],
-  "lastGlobalHeartbeatCheckAt": "2026-03-11T22:43:00+08:00",
-  "lastGlobalHeartbeatCheckResult": "status checked; non-telegram channels normal; no non-telegram session token >=75%; no timeout symptom; no autofix triggered",
+  "lastGlobalHeartbeatCheckAt": "2026-03-11T22:46:00+08:00",
+  "lastGlobalHeartbeatCheckResult": "openclaw status/deep checked; non-telegram channels normal; no non-telegram session token >=75%; no gateway/delivery/announce timeout symptom; no autofix triggered",
   "lastGlobalHeartbeatCheckChannels": [
     "webchat",
     "discord",
