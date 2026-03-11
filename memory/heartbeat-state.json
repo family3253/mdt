@@ -11,7 +11,7 @@
     "feishu",
     "wecom"
   ],
-  "lastGlobalHeartbeatCheckAt": "2026-03-11T22:28:30+08:00",
+  "lastGlobalHeartbeatCheckAt": "2026-03-11T22:31:43+08:00",
   "lastGlobalHeartbeatCheckResult": "status checked; non-telegram channels normal; no non-telegram session token >=75%; no autofix triggered",
   "lastGlobalHeartbeatCheckChannels": [
     "webchat",
