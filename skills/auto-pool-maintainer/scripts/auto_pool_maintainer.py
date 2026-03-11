@@ -373,6 +373,68 @@ def get_candidates_count(
     return len(files), len(candidates)
 
 
+def report_protected_status(
+    *,
+    base_url: str,
+    token: str,
+    timeout: int,
+    user_agent: str,
+    protected_names: List[str],
+    logger: logging.Logger,
+) -> None:
+    names = [str(x).strip() for x in (protected_names or []) if str(x).strip()]
+    if not names:
+        return
+    try:
+        files = fetch_auth_files(base_url, token, timeout)
+    except Exception as e:
+        logger.warning("保护账号状态输出失败: 拉取 auth-files 异常=%s", e)
+        return
+
+    by_name = {}
+    for it in files:
+        n = str(it.get("name") or it.get("id") or "").strip()
+        if n:
+            by_name[n] = it
+
+    logger.info("保护账号状态开始（%s个）", len(names))
+    for n in names:
+        item = by_name.get(n)
+        if not item:
+            logger.warning("保护账号: %s | 状态=不存在", n)
+            continue
+        t = get_item_type(item)
+        idx = str(item.get("auth_index") or "")
+        if not idx:
+            logger.info("保护账号: %s | 类型=%s | 状态=存在(无auth_index)", n, t)
+            continue
+
+        probe_sc = None
+        try:
+            payload = build_probe_payload(
+                idx, user_agent, extract_chatgpt_account_id(item)
+            )
+            r = requests.post(
+                f"{base_url.rstrip('/')}/v0/management/api-call",
+                headers={**mgmt_headers(token), "Content-Type": "application/json"},
+                json=payload,
+                timeout=timeout,
+            )
+            if r.status_code == 200:
+                probe_sc = (r.json() or {}).get("status_code")
+        except Exception:
+            probe_sc = None
+
+        logger.info(
+            "保护账号: %s | 类型=%s | auth_index=%s | models探测=%s",
+            n,
+            t,
+            idx,
+            probe_sc,
+        )
+    logger.info("保护账号状态结束")
+
+
 def create_session(proxy: str = "") -> requests.Session:
     s = requests.Session()
     retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
@@ -2785,6 +2847,17 @@ def main() -> int:
         logger.error("缺少 clean.base_url 或 clean.token/cpa_password")
         return 2
 
+    protected_names = pick_conf(conf, "clean", "protected_names", default=[])
+    if not protected_names and isinstance(conf, dict):
+        protected_names = conf.get("protected_names", [])
+    if not isinstance(protected_names, list):
+        protected_names = []
+
+    extra_candidates = int(
+        pick_conf(conf, "maintainer", "extra_candidates", default=0) or 0
+    )
+    effective_target = min_candidates + max(0, extra_candidates)
+
     try:
         probed_401, deleted_ok, deleted_fail = run_clean_401(conf, logger)
         logger.info(
@@ -2811,18 +2884,28 @@ def main() -> int:
         return 4
 
     logger.info(
-        "删除401后统计: 总账号=%s, candidates=%s, 阈值=%s",
+        "删除401后统计: 总账号=%s, candidates=%s, 阈值=%s(基础%s+额外%s)",
         total_after_clean,
         candidates_after_clean,
+        effective_target,
         min_candidates,
+        max(0, extra_candidates),
     )
 
-    if candidates_after_clean >= min_candidates:
+    if candidates_after_clean >= effective_target:
         logger.info("当前 candidates 已达标，无需补号。")
+        report_protected_status(
+            base_url=base_url,
+            token=token,
+            timeout=args.timeout,
+            user_agent=str(pick_conf(conf, "clean", "user_agent", default=DEFAULT_MGMT_UA) or DEFAULT_MGMT_UA),
+            protected_names=protected_names,
+            logger=logger,
+        )
         logger.info("=== 账号池自动维护结束（成功）===")
         return 0
 
-    gap = min_candidates - candidates_after_clean
+    gap = effective_target - candidates_after_clean
     logger.info("当前 candidates 未达标，缺口=%s，开始补号。", gap)
 
     try:
@@ -2850,13 +2933,23 @@ def main() -> int:
         return 6
 
     logger.info(
-        "补号后统计: 总账号=%s, codex账号=%s, codex目标=%s",
+        "补号后统计: 总账号=%s, codex账号=%s, codex目标=%s(基础%s+额外%s)",
         total_final,
         candidates_final,
+        effective_target,
         min_candidates,
+        max(0, extra_candidates),
     )
-    if candidates_final < min_candidates:
+    if candidates_final < effective_target:
         logger.warning("最终 codex账号数 仍低于阈值，请检查邮箱/OAuth/上传链路。")
+    report_protected_status(
+        base_url=base_url,
+        token=token,
+        timeout=args.timeout,
+        user_agent=str(pick_conf(conf, "clean", "user_agent", default=DEFAULT_MGMT_UA) or DEFAULT_MGMT_UA),
+        protected_names=protected_names,
+        logger=logger,
+    )
     logger.info("=== 账号池自动维护结束（成功）===")
     return 0
 
