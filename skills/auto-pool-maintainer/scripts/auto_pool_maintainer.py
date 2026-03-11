@@ -2392,7 +2392,7 @@ def build_probe_payload(
     # 该接口与 api.openai.com 的可用性并不等价，可能出现“探测通过但模型全挂”。
     # 这里改为直接探测 OpenAI Models API，保证与实际推理链路一致。
     call_header = {
-        "Authorization": "Bearer " + "".join(["$", "TOKEN", "$"]),
+        "Authorization": "Bearer $TOKEN$",
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": user_agent or DEFAULT_MGMT_UA,
