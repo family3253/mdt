@@ -11,8 +11,8 @@
     "feishu",
     "wecom"
   ],
-  "lastGlobalHeartbeatCheckAt": "2026-03-12T00:41:00+08:00",
-  "lastGlobalHeartbeatCheckResult": "openclaw status checked; excluded telegram per rule; non-telegram channels showed no >=75% token pressure and no timeout/channel-state anomalies; no autofix triggered",
+  "lastGlobalHeartbeatCheckAt": "2026-03-12T00:42:00+08:00",
+  "lastGlobalHeartbeatCheckResult": "openclaw status --deep checked; excluded telegram per rule; non-telegram channels showed no >=75% token pressure and no timeout/channel-state anomalies; no autofix triggered",
   "lastGlobalHeartbeatCheckChannels": [
     "webchat",
     "discord",
