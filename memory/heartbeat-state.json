@@ -11,7 +11,7 @@
     "feishu",
     "wecom"
   ],
-  "lastGlobalHeartbeatCheckAt": "2026-03-12T00:52:24+08:00",
+  "lastGlobalHeartbeatCheckAt": "2026-03-12T00:53:50+08:00",
   "lastGlobalHeartbeatCheckResult": "openclaw status checked; excluded telegram per HEARTBEAT.md; non-telegram channels no channel-state anomalies and no >=75% token pressure.",
   "lastGlobalHeartbeatCheckChannels": [
     "webchat",
