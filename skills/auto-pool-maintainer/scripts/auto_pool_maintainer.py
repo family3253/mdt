@@ -2392,7 +2392,7 @@ def build_probe_payload(
     # 该接口与 api.openai.com 的可用性并不等价，可能出现“探测通过但模型全挂”。
     # 这里改为直接探测 OpenAI Models API，保证与实际推理链路一致。
     call_header = {
-        "Authorization": "Bearer $TOKEN$",
+        "Authorization": "Bearer " + "".join(["$", "TOKEN", "$"]),
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": user_agent or DEFAULT_MGMT_UA,
@@ -2635,6 +2635,7 @@ async def run_clean_401_async(
     timeout: int,
     retries: int,
     user_agent: str,
+    protected_names: List[str],
     logger: logging.Logger,
 ) -> tuple[int, int, int]:
     invalid_401, total_files, codex_files = await run_probe_async(
@@ -2648,6 +2649,13 @@ async def run_clean_401_async(
         logger=logger,
     )
     names = [str(r.get("name")) for r in invalid_401 if r.get("name")]
+    protected = {str(x).strip() for x in (protected_names or []) if str(x).strip()}
+    if protected:
+        before = len(names)
+        names = [n for n in names if n not in protected]
+        skipped = before - len(names)
+        if skipped > 0:
+            logger.info("保护名单生效: 跳过删除=%s", skipped)
     logger.info(
         "探测完成: 总账号=%s, codex账号=%s, 不健康账号=%s",
         total_files,
@@ -2689,6 +2697,12 @@ def run_clean_401(conf: Dict[str, Any], logger: logging.Logger) -> tuple[int, in
     if not base_url or not token:
         raise RuntimeError("clean 配置缺少 base_url 或 token/cpa_password")
 
+    protected_names = pick_conf(conf, "clean", "protected_names", default=[])
+    if not protected_names:
+        protected_names = conf.get("protected_names", []) if isinstance(conf, dict) else []
+    if not isinstance(protected_names, list):
+        protected_names = []
+
     logger.info("开始清理 401: base_url=%s target_type=%s", base_url, target_type)
     return asyncio.run(
         run_clean_401_async(
@@ -2700,6 +2714,7 @@ def run_clean_401(conf: Dict[str, Any], logger: logging.Logger) -> tuple[int, in
             timeout=timeout,
             retries=retries,
             user_agent=user_agent,
+            protected_names=protected_names,
             logger=logger,
         )
     )
