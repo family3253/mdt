@@ -811,10 +811,12 @@
       renderRoom();
       renderSectionPanel();
 
-      // 先启动实时链路，避免被其他初始化请求阻塞在“连接中”
-      connectWS();
+      // 当前环境下 WebSocket 不稳定，默认走轮询确保可用
+      wsState.textContent = '轮询模式（WebSocket 已停用）';
+      wsState.style.background = 'rgba(243,156,18,.2)';
+      startPollingFallback();
 
-      // 数据初始化并行执行，任一失败不影响主界面连接状态
+      // 数据初始化并行执行，任一失败不影响主界面可用性
       Promise.allSettled([loadAvailableModels(), loadAgents()]).then((results) => {
         const failed = results.filter(r => r.status === 'rejected').length;
         if (failed > 0) {
