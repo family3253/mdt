@@ -41,6 +41,12 @@ class DiscussionInput(BaseModel):
     message: str
 
 
+class RoundReviewInput(BaseModel):
+    case_id: str
+    from_round: int = Field(default=1, ge=1)
+    to_round: int = Field(default=2, ge=2)
+
+
 class AgentCreate(BaseModel):
     agent_id: str
     role: str
@@ -359,6 +365,97 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
         "round_no": round_no,
         "generated_count": len(generated) + 1,
     }
+
+
+@app.post("/discussion/review")
+async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
+    with conn() as c:
+        base_rows = c.execute(
+            "select event_id, speaker, payload from mdt_events where case_id=? and round_no=? and event_type='agent_opinion' order by event_id asc",
+            (payload.case_id, payload.from_round),
+        ).fetchall()
+
+    if not base_rows:
+        raise HTTPException(status_code=404, detail="no agent opinions found for source round")
+
+    opinions = [
+        {
+            "event_id": r["event_id"],
+            "speaker": r["speaker"],
+            "payload": json.loads(r["payload"]),
+        }
+        for r in base_rows
+    ]
+
+    generated = 0
+    agents = _load_enabled_agents()
+    for idx, (agent_id, specialty, lens) in enumerate(agents):
+        target = opinions[(idx + 1) % len(opinions)]
+        stance = "oppose" if idx % 2 == 0 else "support"
+        ev = MDTEvent(
+            case_id=payload.case_id,
+            round_no=payload.to_round,
+            event_type="agent_review",
+            speaker=agent_id,
+            specialty=specialty,
+            payload={
+                "stance": stance,
+                "target_event_id": target["event_id"],
+                "target_speaker": target["speaker"],
+                "review": f"{agent_id} 对 {target['speaker']} 的观点给出{('反驳' if stance=='oppose' else '支持')}：从{lens}角度补充证据与边界。",
+            },
+            confidence=0.74,
+            reply_to_event_id=target["event_id"],
+        )
+        body = _persist_event(ev)
+        generated += 1
+        await ws_manager.broadcast({"type": "mdt_event", "data": body})
+
+    orchestrator = MDTEvent(
+        case_id=payload.case_id,
+        round_no=payload.to_round,
+        event_type="conflict_detected",
+        speaker="mdt-orchestrator",
+        specialty="mdt",
+        payload={
+            "summary": "二轮互评完成，已形成支持/反驳关系图。",
+            "next_step": "resolve_conflicts_and_finalize",
+        },
+        confidence=0.83,
+    )
+    body = _persist_event(orchestrator)
+    await ws_manager.broadcast({"type": "mdt_event", "data": body})
+
+    return {"accepted": True, "case_id": payload.case_id, "generated_count": generated + 1}
+
+
+@app.get("/cases/{case_id}/conflicts")
+def case_conflicts(case_id: str) -> dict[str, Any]:
+    with conn() as c:
+        rows = c.execute(
+            "select event_id, speaker, specialty, payload, reply_to_event_id from mdt_events where case_id=? and event_type in ('agent_review','conflict_detected') order by event_id asc",
+            (case_id,),
+        ).fetchall()
+
+    edges = []
+    nodes = {}
+    for r in rows:
+        sp = r["speaker"]
+        nodes[sp] = {"id": sp, "specialty": r["specialty"]}
+        if r["reply_to_event_id"]:
+            payload = json.loads(r["payload"])
+            target = payload.get("target_speaker", "unknown")
+            nodes[target] = {"id": target, "specialty": "unknown"}
+            edges.append(
+                {
+                    "from": sp,
+                    "to": target,
+                    "stance": payload.get("stance", "neutral"),
+                    "event_id": r["event_id"],
+                }
+            )
+
+    return {"case_id": case_id, "nodes": list(nodes.values()), "edges": edges, "count": len(edges)}
 
 
 @app.get("/cases/{case_id}/events")

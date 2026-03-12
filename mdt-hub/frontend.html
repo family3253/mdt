@@ -25,6 +25,8 @@
     <label>Case ID:</label><input id="caseId" value="CASE-LIVE-001" />
     <label>临床输入:</label><input id="msg" size="70" value="患者发热低血压，近期广谱抗菌药暴露" />
     <button onclick="submitDiscussion()">提交讨论</button>
+    <button onclick="runReviewRound()">发起二轮互评</button>
+    <button onclick="loadConflictGraph()">刷新冲突图</button>
     <span id="status" class="meta"></span>
   </div>
 
@@ -58,9 +60,15 @@
     </div>
   </div>
 
-  <div class="card">
-    <h3>共识收敛曲线</h3>
-    <div id="consensusChart"></div>
+  <div class="row">
+    <div class="card">
+      <h3>共识收敛曲线</h3>
+      <div id="consensusChart"></div>
+    </div>
+    <div class="card">
+      <h3>冲突关系图（支持/反驳）</h3>
+      <div id="conflictChart" style="height:260px;"></div>
+    </div>
   </div>
 
   <script>
@@ -74,6 +82,7 @@
 
     const speakerChart = echarts.init(document.getElementById('speakerChart'));
     const consensusChart = echarts.init(document.getElementById('consensusChart'));
+    const conflictChart = echarts.init(document.getElementById('conflictChart'));
 
     function renderCharts() {
       speakerChart.setOption({ xAxis: { type: 'category', data: Object.keys(speakerCounter) }, yAxis: { type: 'value' }, series: [{ type: 'bar', data: Object.values(speakerCounter) }] });
@@ -125,6 +134,40 @@
       const resp = await fetch(`${API}/agents`);
       const data = await resp.json();
       document.getElementById('agentsList').textContent = `当前 Agent(${data.count}): ` + data.agents.map(a => `${a.agent_id}[${a.specialty}]`).join(' | ');
+    }
+
+    async function runReviewRound() {
+      const caseId = document.getElementById('caseId').value.trim();
+      const resp = await fetch(`${API}/discussion/review`, {
+        method: 'POST', headers: {'content-type':'application/json'},
+        body: JSON.stringify({case_id: caseId, from_round: 1, to_round: 2})
+      });
+      const data = await resp.json();
+      statusEl.textContent = `二轮互评完成，新增 ${data.generated_count} 条事件`;
+      await loadConflictGraph();
+    }
+
+    async function loadConflictGraph() {
+      const caseId = document.getElementById('caseId').value.trim();
+      const resp = await fetch(`${API}/cases/${caseId}/conflicts`);
+      const data = await resp.json();
+      const nodes = (data.nodes || []).map((n, i) => ({ id: n.id, name: n.id, value: i }));
+      const links = (data.edges || []).map(e => ({
+        source: e.from,
+        target: e.to,
+        lineStyle: { color: e.stance === 'oppose' ? '#d9534f' : '#2ca02c' },
+        label: { show: true, formatter: e.stance }
+      }));
+      conflictChart.setOption({
+        series: [{
+          type: 'graph',
+          layout: 'force',
+          roam: true,
+          label: { show: true },
+          data: nodes,
+          links
+        }]
+      });
     }
   </script>
 </body>
