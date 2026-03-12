@@ -286,11 +286,13 @@
   <script>
     const BASE_HOST = location.hostname || '127.0.0.1';
     const WS_PROTO = location.protocol === 'https:' ? 'wss' : 'ws';
-    const IS_BACKEND_ORIGIN = location.port === '8788';
-    const API = IS_BACKEND_ORIGIN ? `${location.protocol}//${location.host}` : `http://${BASE_HOST}:8788`;
-    const WS_URL = IS_BACKEND_ORIGIN
-      ? `${WS_PROTO}://${location.host}/ws/events`
-      : `${WS_PROTO}://${BASE_HOST}:8788/ws/events`;
+    const urlParams = new URLSearchParams(location.search);
+    const API_OVERRIDE = urlParams.get('api');
+    const IS_LOCAL = ['127.0.0.1', 'localhost'].includes(BASE_HOST);
+    const API = API_OVERRIDE || (IS_LOCAL ? `http://${BASE_HOST}:8788` : `${location.protocol}//${location.host}`);
+    const WS_URL = API_OVERRIDE
+      ? `${API_OVERRIDE.replace(/^http/i, WS_PROTO)}/ws/events`
+      : (IS_LOCAL ? `${WS_PROTO}://${BASE_HOST}:8788/ws/events` : `${WS_PROTO}://${location.host}/ws/events`);
     let ws = null;
     const wsState = document.getElementById('wsState');
     const statusEl = document.getElementById('status');
@@ -667,38 +669,42 @@
       const message = document.getElementById('msg').value.trim();
       if (!message) { statusEl.textContent = '请先输入会诊问题'; return; }
       const confirmedSections = getConfirmedSectionsPayload();
-      await fetch(`${API}/cases/open`, {
-        method: 'POST', headers: {'content-type': 'application/json'},
-        body: JSON.stringify({case_id: caseId, patient_summary: {note: 'interactive case'}})
-      });
-      const resp = await fetch(`${API}/discussion/submit`, {
-        method: 'POST', headers: {'content-type': 'application/json'},
-        body: JSON.stringify({
-          case_id: caseId,
-          round_no: 1,
-          speaker: 'human_clinician',
-          message,
-          confirmed_sections: confirmedSections,
-          enable_docs_context: document.getElementById('enableDocsContext').checked,
-        })
-      });
-      const data = await resp.json();
-      if (!resp.ok) { statusEl.textContent = `提交失败: ${JSON.stringify(data)}`; return; }
-      const picked = Object.values(confirmedSections).reduce((n, arr) => n + (arr || []).filter(x => x.confirmed).length, 0);
-      const docsInfo = `病历上下文:${data.docs_context_enabled ? '开' : '关'} 文档${data.docs_context_doc_count ?? 0}份`;
-      statusEl.textContent = `已提交讨论，生成 ${data.generated_count} 条响应（已带入确认条目 ${picked} 条，${docsInfo}）`;
+      try {
+        await requestWithMeta('/cases/open', {
+          method: 'POST', headers: {'content-type': 'application/json'},
+          body: JSON.stringify({case_id: caseId, patient_summary: {note: 'interactive case'}})
+        });
+        const { data } = await requestWithMeta('/discussion/submit', {
+          method: 'POST', headers: {'content-type': 'application/json'},
+          body: JSON.stringify({
+            case_id: caseId,
+            round_no: 1,
+            speaker: 'human_clinician',
+            message,
+            confirmed_sections: confirmedSections,
+            enable_docs_context: document.getElementById('enableDocsContext').checked,
+          })
+        });
+        const picked = Object.values(confirmedSections).reduce((n, arr) => n + (arr || []).filter(x => x.confirmed).length, 0);
+        const docsInfo = `病历上下文:${data.docs_context_enabled ? '开' : '关'} 文档${data.docs_context_doc_count ?? 0}份`;
+        statusEl.textContent = `已提交讨论，生成 ${data.generated_count} 条响应（已带入确认条目 ${picked} 条，${docsInfo}）`;
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '提交失败');
+      }
     }
 
     async function runReviewRound() {
       const caseId = document.getElementById('caseId').value.trim();
-      const resp = await fetch(`${API}/discussion/review`, {
-        method: 'POST', headers: {'content-type':'application/json'},
-        body: JSON.stringify({case_id: caseId, from_round: 1, to_round: 2})
-      });
-      const data = await resp.json();
-      if (!resp.ok) { statusEl.textContent = `二轮互评失败: ${JSON.stringify(data)}`; return; }
-      statusEl.textContent = `二轮互评完成，新增 ${data.generated_count} 条事件`;
-      await loadConflictGraph();
+      try {
+        const { data } = await requestWithMeta('/discussion/review', {
+          method: 'POST', headers: {'content-type':'application/json'},
+          body: JSON.stringify({case_id: caseId, from_round: 1, to_round: 2})
+        });
+        statusEl.textContent = `二轮互评完成，新增 ${data.generated_count} 条事件`;
+        await loadConflictGraph();
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '二轮互评失败');
+      }
     }
 
     async function createAgent() {
@@ -707,51 +713,61 @@
       const specialty = document.getElementById('newAgentSpec').value.trim();
       const model = document.getElementById('newAgentModel').value.trim();
       const prompt = document.getElementById('newAgentPrompt').value.trim();
-      const resp = await fetch(`${API}/agents`, {
-        method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({agent_id, role, specialty, model, prompt, auto_learn_web: true})
-      });
-      const data = await resp.json();
-      if (!resp.ok) { statusEl.textContent = `新增失败: ${JSON.stringify(data)}`; return; }
-      statusEl.textContent = `已新增 ${agent_id}（模型: ${data.model || '默认'}）；推荐技能: ${(data.skill_suggestions || []).join(', ') || '无'}`;
-      await loadAgents();
+      try {
+        const { data } = await requestWithMeta('/agents', {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({agent_id, role, specialty, model, prompt, auto_learn_web: true})
+        });
+        statusEl.textContent = `已新增 ${agent_id}（模型: ${data.model || '默认'}）；推荐技能: ${(data.skill_suggestions || []).join(', ') || '无'}`;
+        await loadAgents();
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '新增失败');
+      }
     }
 
     async function updateAgentModel(agent_id, model) {
       const targetAgent = (agent_id || '').trim();
       const targetModel = typeof model === 'string' ? model.trim() : '';
       if (!targetAgent) { statusEl.textContent = '模型配置失败：缺少 agent_id'; return; }
-      const resp = await fetch(`${API}/agents/${targetAgent}/model`, {
-        method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({model: targetModel})
-      });
-      const data = await resp.json();
-      if (!resp.ok) { statusEl.textContent = `模型更新失败: ${JSON.stringify(data)}`; return; }
-      statusEl.textContent = `已更新 ${targetAgent} 模型为 ${data.model || '默认模型'}`;
-      await loadAgents();
+      try {
+        const { data } = await requestWithMeta(`/agents/${targetAgent}/model`, {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({model: targetModel})
+        });
+        statusEl.textContent = `已更新 ${targetAgent} 模型为 ${data.model || '默认模型'}`;
+        await loadAgents();
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '模型更新失败');
+      }
     }
 
     async function feedKnowledge() {
       const agent_id = document.getElementById('feedAgentId').value.trim();
       const source = document.getElementById('feedSource').value.trim() || 'manual';
       const content = document.getElementById('feedContent').value.trim();
-      const resp = await fetch(`${API}/agents/${agent_id}/knowledge`, {
-        method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({source, content, tags:[]})
-      });
-      if (!resp.ok) { statusEl.textContent = `喂知识失败: ${await resp.text()}`; return; }
-      statusEl.textContent = `已给 ${agent_id} 注入文本知识`;
+      try {
+        await requestWithMeta(`/agents/${agent_id}/knowledge`, {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({source, content, tags:[]})
+        });
+        statusEl.textContent = `已给 ${agent_id} 注入文本知识`;
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '喂知识失败');
+      }
     }
 
     async function feedKnowledgeUrl() {
       const agent_id = document.getElementById('feedAgentId').value.trim();
       const url = document.getElementById('feedUrl').value.trim();
-      const resp = await fetch(`${API}/agents/${agent_id}/knowledge/url`, {
-        method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({url, source:'url'})
-      });
-      if (!resp.ok) { statusEl.textContent = `网址注入失败: ${await resp.text()}`; return; }
-      statusEl.textContent = `已给 ${agent_id} 注入网址知识`;
+      try {
+        await requestWithMeta(`/agents/${agent_id}/knowledge/url`, {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({url, source:'url'})
+        });
+        statusEl.textContent = `已给 ${agent_id} 注入网址知识`;
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '网址注入失败');
+      }
     }
 
     async function feedKnowledgeFile() {
@@ -761,22 +777,27 @@
       const fd = new FormData();
       fd.append('file', f);
       fd.append('tags', 'file,upload');
-      const resp = await fetch(`${API}/agents/${agent_id}/knowledge/upload`, { method:'POST', body: fd });
-      if (!resp.ok) { statusEl.textContent = `文件注入失败: ${await resp.text()}`; return; }
-      statusEl.textContent = `已给 ${agent_id} 注入文件知识`;
+      try {
+        await requestWithMeta(`/agents/${agent_id}/knowledge/upload`, { method:'POST', body: fd });
+        statusEl.textContent = `已给 ${agent_id} 注入文件知识`;
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '文件注入失败');
+      }
     }
 
     async function uploadCaseDocUrl() {
       const caseId = document.getElementById('caseId').value.trim();
       const url = document.getElementById('caseDocUrl').value.trim();
-      const resp = await fetch(`${API}/cases/${caseId}/documents/url`, {
-        method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({url, source:'url'})
-      });
-      const data = await resp.json();
-      if (!resp.ok) { statusEl.textContent = `病历网址导入失败: ${JSON.stringify(data)}`; return; }
-      applySections(data.sections || {});
-      statusEl.textContent = `病历导入完成，提取影像${(data.sections?.imaging||[]).length}条，检验${(data.sections?.labs||[]).length}条，用药${(data.sections?.medications||[]).length}条`;
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/documents/url`, {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({url, source:'url'})
+        });
+        applySections(data.sections || {});
+        statusEl.textContent = `病历导入完成，提取影像${(data.sections?.imaging||[]).length}条，检验${(data.sections?.labs||[]).length}条，用药${(data.sections?.medications||[]).length}条`;
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '病历网址导入失败');
+      }
     }
 
     async function uploadCaseDocFile() {
@@ -785,11 +806,13 @@
       if (!f) { statusEl.textContent = '请先选择病历文件'; return; }
       const fd = new FormData();
       fd.append('file', f);
-      const resp = await fetch(`${API}/cases/${caseId}/documents/upload`, { method:'POST', body: fd });
-      const data = await resp.json();
-      if (!resp.ok) { statusEl.textContent = `病历文件导入失败: ${JSON.stringify(data)}`; return; }
-      applySections(data.sections || {});
-      statusEl.textContent = `病历上传完成，提取影像${(data.sections?.imaging||[]).length}条，检验${(data.sections?.labs||[]).length}条，用药${(data.sections?.medications||[]).length}条`;
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/documents/upload`, { method:'POST', body: fd });
+        applySections(data.sections || {});
+        statusEl.textContent = `病历上传完成，提取影像${(data.sections?.imaging||[]).length}条，检验${(data.sections?.labs||[]).length}条，用药${(data.sections?.medications||[]).length}条`;
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '病历文件导入失败');
+      }
     }
 
     function modelOptionsHtml(selectedValue = '') {
@@ -804,46 +827,34 @@
     }
 
     async function loadAvailableModels() {
-      try {
-        const resp = await fetch(`${API}/models/available`);
-        const data = await resp.json();
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}: ${JSON.stringify(data)}`);
-        }
-        availableModels = (data.models || []).map(x => String(x || '').trim()).filter(Boolean);
-        defaultModel = String(data.default_model || defaultModel);
+      const { data } = await requestWithMeta('/models/available', {}, 'models');
+      availableModels = (data.models || []).map(x => String(x || '').trim()).filter(Boolean);
+      defaultModel = String(data.default_model || defaultModel);
 
-        const newAgentModel = document.getElementById('newAgentModel');
-        newAgentModel.innerHTML = modelOptionsHtml('');
-        if (data.fallback) {
-          statusEl.textContent = `模型列表使用降级配置：${data.note || 'fallback'}`;
-        }
-      } catch (e) {
-        statusEl.textContent = `加载模型列表失败: ${e?.message || e}`;
-        throw e;
+      const newAgentModel = document.getElementById('newAgentModel');
+      newAgentModel.innerHTML = modelOptionsHtml('');
+      if (data.fallback) {
+        statusEl.textContent = `模型列表使用降级配置：${data.note || 'fallback'}`;
       }
     }
 
     async function saveAgentModel(agentId, inputId) {
       const model = document.getElementById(inputId).value.trim();
-      const resp = await fetch(`${API}/agents/${agentId}/model`, {
-        method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({ model })
-      });
-      const data = await resp.json();
-      if (!resp.ok) { statusEl.textContent = `模型更新失败: ${JSON.stringify(data)}`; return; }
-      statusEl.textContent = `已更新 ${agentId} 模型为 ${data.model || '默认'}`;
-      await loadAgents();
+      try {
+        const { data } = await requestWithMeta(`/agents/${agentId}/model`, {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({ model })
+        });
+        statusEl.textContent = `已更新 ${agentId} 模型为 ${data.model || '默认'}`;
+        await loadAgents();
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '模型更新失败');
+      }
     }
 
     async function loadAgents() {
-      try {
-        const resp = await fetch(`${API}/agents`);
-        const data = await resp.json();
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}: ${JSON.stringify(data)}`);
-        }
-        document.getElementById('agentsList').textContent = `当前 Agent(${data.count}): ` + data.agents.map(a => `${a.agent_id}[${a.specialty}]`).join(' | ');
+      const { data } = await requestWithMeta('/agents', {}, 'agents');
+      document.getElementById('agentsList').textContent = `当前 Agent(${data.count}): ` + data.agents.map(a => `${a.agent_id}[${a.specialty}]`).join(' | ');
 
       const modelBox = document.getElementById('agentModelList');
       modelBox.innerHTML = '';
@@ -864,28 +875,26 @@
       });
 
       renderRoom();
-      } catch (e) {
-        statusEl.textContent = `加载 Agent 列表失败: ${e?.message || e}`;
-        throw e;
-      }
     }
 
     async function loadConflictGraph() {
       const caseId = document.getElementById('caseId').value.trim();
-      const resp = await fetch(`${API}/cases/${caseId}/conflicts`);
-      const data = await resp.json();
-      if (!resp.ok) { statusEl.textContent = `加载冲突图失败: ${JSON.stringify(data)}`; return; }
-      const nodes = (data.nodes || []).map((n, i) => ({ id: n.id, name: n.id, value: i, symbolSize: 44 }));
-      const links = (data.edges || []).map(e => ({
-        source: e.from,
-        target: e.to,
-        lineStyle: { color: e.stance === 'oppose' ? '#ff5f6d' : '#2ecc71', width: 2 },
-        label: { show: true, formatter: e.stance }
-      }));
-      conflictChart.setOption({
-        tooltip: {},
-        series: [{ type: 'graph', layout: 'force', roam: true, label: { show: true, color: '#dbe6ff' }, data: nodes, links }]
-      });
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/conflicts`);
+        const nodes = (data.nodes || []).map((n, i) => ({ id: n.id, name: n.id, value: i, symbolSize: 44 }));
+        const links = (data.edges || []).map(e => ({
+          source: e.from,
+          target: e.to,
+          lineStyle: { color: e.stance === 'oppose' ? '#ff5f6d' : '#2ecc71', width: 2 },
+          label: { show: true, formatter: e.stance }
+        }));
+        conflictChart.setOption({
+          tooltip: {},
+          series: [{ type: 'graph', layout: 'force', roam: true, label: { show: true, color: '#dbe6ff' }, data: nodes, links }]
+        });
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '加载冲突图失败');
+      }
     }
 
     document.querySelectorAll('.tab').forEach(tab => {
@@ -898,25 +907,43 @@
       };
     });
 
+    async function retryLoadModels() {
+      try {
+        await loadAvailableModels();
+        statusEl.textContent = '模型列表加载成功';
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '加载模型列表失败');
+      }
+    }
+
+    async function retryLoadAgents() {
+      try {
+        await loadAgents();
+        statusEl.textContent = 'Agent 列表加载成功';
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '加载 Agent 列表失败');
+      }
+    }
+
     async function initPage() {
       renderRoom();
       renderSectionPanel();
+      updateDiagnostics();
 
       // 当前环境下 WebSocket 不稳定，默认走轮询确保可用
       wsState.textContent = '轮询模式（WebSocket 已停用）';
       wsState.style.background = 'rgba(243,156,18,.2)';
       startPollingFallback();
-      if (IS_BACKEND_ORIGIN) {
-        connectWS();
-      } else {
-        statusEl.textContent = '建议通过 :8788 打开 frontend.html 以启用同源 WebSocket';
+      connectWS();
+      if (!IS_LOCAL && !API_OVERRIDE) {
+        statusEl.textContent = '已使用同源 API/WS；如反代路径特殊可加 ?api=http://host:port 覆盖';
       }
 
       // 数据初始化并行执行，任一失败不影响主界面可用性
       Promise.allSettled([loadAvailableModels(), loadAgents()]).then((results) => {
         const failed = results.filter(r => r.status === 'rejected').length;
         if (failed > 0) {
-          statusEl.textContent = `初始化完成（${failed}项加载失败，可重试）`;
+          statusEl.textContent = `初始化完成（${failed}项加载失败，可手动重试）`;
         }
       });
     }
