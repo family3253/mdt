@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MDT 会诊控制台</title>
+  <title data-i18n="pageTitle">MDT 会诊控制台</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
   <style>
     :root {
@@ -16,6 +16,8 @@
       --warn: #f39c12;
       --bad: #ff5f6d;
       --accent: #6ea8fe;
+      --accent-2: #4f7ee8;
+      --panel-glow: rgba(110,168,254,.12);
     }
     * { box-sizing: border-box; }
     body {
@@ -26,28 +28,87 @@
     }
     .app {
       display: grid;
-      grid-template-columns: 320px 1fr;
+      grid-template-columns: 340px 1fr;
       min-height: 100vh;
+      gap: 0;
     }
     .sidebar {
       border-right: 1px solid var(--line);
-      background: rgba(8,12,24,.75);
+      background: linear-gradient(180deg, rgba(8,12,24,.92) 0%, rgba(8,12,24,.82) 100%);
       padding: 16px;
     }
-    .main { padding: 16px; }
-    .title { margin: 0 0 8px; font-size: 20px; }
-    .muted { color: var(--muted); font-size: 12px; }
-    .status-pill {
-      display: inline-block; padding: 4px 10px; border-radius: 999px;
-      font-size: 12px; background: rgba(46,204,113,.2); border: 1px solid rgba(46,204,113,.4);
+    .main { padding: 18px; }
+
+    .header-box {
+      background: linear-gradient(165deg, rgba(20,30,58,.95) 0%, rgba(16,24,45,.95) 100%);
+      border: 1px solid #30406a;
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 10px 24px rgba(6,10,20,.28);
+      margin-bottom: 12px;
     }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .title { margin: 0 0 6px; font-size: 20px; letter-spacing: .2px; }
+    .muted { color: var(--muted); font-size: 12px; }
+
+    .lang-switch {
+      display: flex;
+      border: 1px solid #3a4d7d;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(11,16,32,.6);
+    }
+    .lang-btn {
+      width: auto;
+      min-width: 48px;
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      padding: 6px 10px;
+      font-size: 12px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .lang-btn.active {
+      background: rgba(110,168,254,.22);
+      color: #dce8ff;
+      font-weight: 600;
+    }
+
+    .status-pill {
+      display: inline-block;
+      padding: 5px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid transparent;
+      background: rgba(243,156,18,.18);
+      color: #ffd79d;
+    }
+    .status-pill.ok { background: rgba(46,204,113,.18); border-color: rgba(46,204,113,.45); color: #bcffd4; }
+    .status-pill.warn { background: rgba(243,156,18,.18); border-color: rgba(243,156,18,.45); color: #ffd79d; }
+    .status-pill.bad { background: rgba(255,95,109,.18); border-color: rgba(255,95,109,.45); color: #ffc0c8; }
+
     .panel {
-      background: var(--card);
+      background: linear-gradient(180deg, rgba(19,26,46,.96) 0%, rgba(15,22,40,.96) 100%);
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 12px;
       margin-bottom: 12px;
+      box-shadow: 0 8px 18px rgba(4,8,16,.24), inset 0 1px 0 rgba(255,255,255,.03);
     }
+    .panel > b {
+      display: block;
+      margin-bottom: 6px;
+      letter-spacing: .2px;
+      color: #dce8ff;
+    }
+
     input, textarea, button, select {
       width: 100%;
       margin-top: 8px;
@@ -58,16 +119,22 @@
       padding: 10px;
       outline: none;
     }
-    button { cursor: pointer; background: #1d2a4f; }
-    button:hover { border-color: #4a6ec4; }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(110,168,254,.14); }
+    button { cursor: pointer; background: #1b2748; transition: .18s ease; }
+    button:hover { border-color: #4a6ec4; transform: translateY(-1px); }
+
+    .btn-primary { background: linear-gradient(180deg, #2d4c9c 0%, #253f83 100%); border-color: #4d74d1; }
+    .btn-secondary { background: #1a2341; border-color: #3a4f84; }
+    .btn-ghost { background: rgba(18,28,54,.55); border-style: dashed; }
+
     .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
     .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
     .tab {
       padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
-      color: var(--muted);
+      color: var(--muted); background: rgba(13,20,38,.65);
     }
-    .tab.active { color: var(--text); border-color: var(--accent); }
+    .tab.active { color: var(--text); border-color: var(--accent); background: rgba(110,168,254,.13); }
     .view { display: none; }
     .view.active { display: block; }
 
@@ -76,8 +143,8 @@
     .chart { height: 300px; }
     .timeline { max-height: 320px; overflow: auto; }
 
-    .section-col { border: 1px solid #2a375f; border-radius: 10px; padding: 8px; background: #0f152a; }
-    .section-col h4 { margin: 0 0 8px; font-size: 14px; }
+    .section-col { border: 1px solid #2a375f; border-radius: 10px; padding: 8px; background: #0f152a; min-height: 220px; }
+    .section-col h4 { margin: 0 0 8px; font-size: 14px; color: #dce8ff; }
     .section-list { display: flex; flex-direction: column; gap: 8px; }
     .section-item { border: 1px solid #334270; border-radius: 10px; padding: 8px; background: rgba(16, 23, 44, .85); }
     .section-item textarea { min-height: 62px; margin-top: 0; }
@@ -100,6 +167,7 @@
       border: 1px solid var(--line);
       border-radius: 16px;
       overflow: hidden;
+      box-shadow: 0 10px 24px rgba(6,10,20,.28);
     }
     .meeting-table {
       position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -107,6 +175,7 @@
       background: #2a365f; border: 2px solid #4a5a8b;
       display: flex; align-items: center; justify-content: center;
       color: #c9d8ff; font-size: 14px;
+      box-shadow: 0 0 0 8px var(--panel-glow);
     }
     .seat {
       position: absolute;
@@ -147,12 +216,20 @@
 <body>
   <div class="app">
     <aside class="sidebar">
-      <h2 class="title">MDT 控制台</h2>
-      <div><span id="wsState" class="status-pill">连接中...</span></div>
-      <div id="status" class="muted" style="margin-top:8px;">等待操作</div>
+      <div class="header-box">
+        <div class="header-top">
+          <h2 class="title" data-i18n="headerTitle">MDT 控制台</h2>
+          <div class="lang-switch" aria-label="language switch">
+            <button id="lang-zh" class="lang-btn" onclick="setLanguage('zh')">ZH</button>
+            <button id="lang-en" class="lang-btn" onclick="setLanguage('en')">EN</button>
+          </div>
+        </div>
+        <div><span id="wsState" class="status-pill warn" data-i18n="wsConnecting">连接中...</span></div>
+        <div id="status" class="muted" style="margin-top:8px;" data-i18n="statusWaiting">等待操作</div>
+      </div>
 
       <div class="panel">
-        <b>连接诊断</b>
+        <b data-i18n="diagTitle">连接诊断</b>
         <div id="diagApi" class="muted" style="margin-top:6px;"></div>
         <div id="diagModels" class="muted" style="margin-top:4px;"></div>
         <div id="diagAgents" class="muted" style="margin-top:4px;"></div>
@@ -160,100 +237,100 @@
         <div id="diagWs" class="muted" style="margin-top:4px;"></div>
         <div id="diagWsClose" class="muted" style="margin-top:4px;"></div>
         <div class="btn-row" style="margin-top:8px;">
-          <button onclick="retryLoadModels()">重试加载模型</button>
-          <button onclick="retryLoadAgents()">重试加载 Agent</button>
+          <button class="btn-secondary" onclick="retryLoadModels()" data-i18n="retryModels">重试加载模型</button>
+          <button class="btn-secondary" onclick="retryLoadAgents()" data-i18n="retryAgents">重试加载 Agent</button>
         </div>
       </div>
 
       <div class="panel">
-        <b>会诊输入</b>
+        <b data-i18n="consultInput">会诊输入</b>
         <input id="caseId" value="CASE-LIVE-001" placeholder="Case ID" />
-        <textarea id="msg" placeholder="输入临床问题...">患者发热低血压，近期广谱抗菌药暴露，伴 AKI 风险</textarea>
+        <textarea id="msg" data-i18n-ph="msgPlaceholder" placeholder="输入临床问题...">患者发热低血压，近期广谱抗菌药暴露，伴 AKI 风险</textarea>
         <label class="check-inline" style="margin-top:8px; display:flex;">
           <input id="enableDocsContext" type="checkbox" checked />
-          启用病历直读上下文
+          <span data-i18n="enableDocs">启用病历直读上下文</span>
         </label>
         <div class="btn-row">
-          <button onclick="submitDiscussion()">提交讨论</button>
-          <button onclick="runReviewRound()">二轮互评</button>
+          <button class="btn-primary" onclick="submitDiscussion()" data-i18n="submitDiscussion">提交讨论</button>
+          <button class="btn-secondary" onclick="runReviewRound()" data-i18n="reviewRound">二轮互评</button>
         </div>
-        <button onclick="loadConflictGraph()">刷新冲突图</button>
+        <button class="btn-ghost" onclick="loadConflictGraph()" data-i18n="refreshConflict">刷新冲突图</button>
       </div>
 
       <div class="panel">
-        <b>上传病历（文件/网址）</b>
-        <input id="caseDocUrl" placeholder="病历网址（支持网页/PDF链接）" />
+        <b data-i18n="uploadCaseTitle">上传病历（文件/网址）</b>
+        <input id="caseDocUrl" data-i18n-ph="caseDocUrlPlaceholder" placeholder="病历网址（支持网页/PDF链接）" />
         <input id="caseDocFile" type="file" />
         <div class="btn-row">
-          <button onclick="uploadCaseDocUrl()">导入网址病历</button>
-          <button onclick="uploadCaseDocFile()">上传病历文件</button>
+          <button class="btn-secondary" onclick="uploadCaseDocUrl()" data-i18n="importCaseUrl">导入网址病历</button>
+          <button class="btn-secondary" onclick="uploadCaseDocFile()" data-i18n="uploadCaseFile">上传病历文件</button>
         </div>
       </div>
 
       <div class="panel">
-        <b>病历解析结果面板（可编辑确认）</b>
-        <div class="muted" style="margin:6px 0 8px;">提交会诊前可确认/采纳影像、检验、用药条目</div>
+        <b data-i18n="parsedPanelTitle">病历解析结果面板（可编辑确认）</b>
+        <div class="muted" style="margin:6px 0 8px;" data-i18n="parsedPanelHint">提交会诊前可确认/采纳影像、检验、用药条目</div>
         <div class="grid3">
           <div class="section-col">
-            <h4>影像</h4>
+            <h4 data-i18n="imaging">影像</h4>
             <div id="section-imaging" class="section-list"></div>
             <div id="err-imaging" class="err-tip"></div>
-            <button class="mini-btn" onclick="addSectionItem('imaging')">+ 新增影像条目</button>
+            <button class="mini-btn btn-secondary" onclick="addSectionItem('imaging')" data-i18n="addImaging">+ 新增影像条目</button>
           </div>
           <div class="section-col">
-            <h4>检验</h4>
+            <h4 data-i18n="labs">检验</h4>
             <div id="section-labs" class="section-list"></div>
             <div id="err-labs" class="err-tip"></div>
-            <button class="mini-btn" onclick="addSectionItem('labs')">+ 新增检验条目</button>
+            <button class="mini-btn btn-secondary" onclick="addSectionItem('labs')" data-i18n="addLabs">+ 新增检验条目</button>
           </div>
           <div class="section-col">
-            <h4>用药</h4>
+            <h4 data-i18n="medications">用药</h4>
             <div id="section-medications" class="section-list"></div>
             <div id="err-medications" class="err-tip"></div>
-            <button class="mini-btn" onclick="addSectionItem('medications')">+ 新增用药条目</button>
+            <button class="mini-btn btn-secondary" onclick="addSectionItem('medications')" data-i18n="addMeds">+ 新增用药条目</button>
           </div>
         </div>
         <div class="btn-row" style="margin-top:8px;">
-          <button onclick="loadLatestParsedSections()">加载最近解析结果</button>
-          <button onclick="resetSectionPanel()">清空面板</button>
+          <button class="btn-secondary" onclick="loadLatestParsedSections()" data-i18n="loadLatestParsed">加载最近解析结果</button>
+          <button class="btn-secondary" onclick="resetSectionPanel()" data-i18n="clearPanel">清空面板</button>
         </div>
       </div>
 
       <div class="panel">
-        <b>新增 Agent</b>
+        <b data-i18n="addAgentTitle">新增 Agent</b>
         <input id="newAgentId" placeholder="agent_id e.g. mdt-radiology" />
-        <input id="newAgentRole" placeholder="角色 e.g. 影像评估" />
+        <input id="newAgentRole" data-i18n-ph="newAgentRolePlaceholder" placeholder="角色 e.g. 影像评估" />
         <input id="newAgentSpec" placeholder="specialty e.g. radiology" />
         <select id="newAgentModel"></select>
-        <textarea id="newAgentPrompt" placeholder="可选：自定义补充提示词"></textarea>
-        <button onclick="createAgent()">新增</button>
+        <textarea id="newAgentPrompt" data-i18n-ph="newAgentPromptPlaceholder" placeholder="可选：自定义补充提示词"></textarea>
+        <button class="btn-primary" onclick="createAgent()" data-i18n="create">新增</button>
       </div>
 
       <div class="panel">
-        <b>喂知识（文本/文件/网址）</b>
+        <b data-i18n="feedKnowledgeTitle">喂知识（文本/文件/网址）</b>
         <input id="feedAgentId" placeholder="agent_id" />
         <input id="feedSource" value="manual" placeholder="source" />
-        <textarea id="feedContent" placeholder="粘贴指南/经验知识...">AKI 场景优先按 eGFR 分层调整剂量并联合 TDM。</textarea>
-        <input id="feedUrl" placeholder="知识网址（网页/PDF）" />
+        <textarea id="feedContent" data-i18n-ph="feedContentPlaceholder" placeholder="粘贴指南/经验知识...">AKI 场景优先按 eGFR 分层调整剂量并联合 TDM。</textarea>
+        <input id="feedUrl" data-i18n-ph="feedUrlPlaceholder" placeholder="知识网址（网页/PDF）" />
         <input id="feedFile" type="file" />
         <div class="btn-row">
-          <button onclick="feedKnowledge()">注入文本</button>
-          <button onclick="feedKnowledgeUrl()">注入网址</button>
+          <button class="btn-secondary" onclick="feedKnowledge()" data-i18n="injectText">注入文本</button>
+          <button class="btn-secondary" onclick="feedKnowledgeUrl()" data-i18n="injectUrl">注入网址</button>
         </div>
-        <button onclick="feedKnowledgeFile()">注入文件</button>
+        <button class="btn-secondary" onclick="feedKnowledgeFile()" data-i18n="injectFile">注入文件</button>
       </div>
 
       <div class="panel">
-        <b>Agent 模型配置</b>
-        <div class="muted" id="agentsList" style="margin-top:6px;">当前 Agent: loading...</div>
+        <b data-i18n="agentModelTitle">Agent 模型配置</b>
+        <div class="muted" id="agentsList" style="margin-top:6px;" data-i18n="agentsLoading">当前 Agent: loading...</div>
         <div id="agentModelList"></div>
       </div>
     </aside>
 
     <main class="main">
       <div class="tabs">
-        <div class="tab active" data-tab="room">会诊室视图</div>
-        <div class="tab" data-tab="analytics">数据分析视图</div>
+        <div class="tab active" data-tab="room" data-i18n="tabRoom">会诊室视图</div>
+        <div class="tab" data-tab="analytics" data-i18n="tabAnalytics">数据分析视图</div>
       </div>
 
       <section id="view-room" class="view active">
@@ -263,21 +340,21 @@
       <section id="view-analytics" class="view">
         <div class="grid2">
           <div class="panel">
-            <h3 style="margin-top:0">实时时间线</h3>
+            <h3 style="margin-top:0" data-i18n="timelineTitle">实时时间线</h3>
             <div id="timeline" class="timeline"></div>
           </div>
           <div class="panel">
-            <h3 style="margin-top:0">专家发言分布</h3>
+            <h3 style="margin-top:0" data-i18n="speakerDist">专家发言分布</h3>
             <div id="speakerChart" class="chart"></div>
           </div>
         </div>
         <div class="grid2">
           <div class="panel">
-            <h3 style="margin-top:0">共识收敛曲线</h3>
+            <h3 style="margin-top:0" data-i18n="consensusCurve">共识收敛曲线</h3>
             <div id="consensusChart" class="chart"></div>
           </div>
           <div class="panel">
-            <h3 style="margin-top:0">冲突关系图</h3>
+            <h3 style="margin-top:0" data-i18n="conflictGraph">冲突关系图</h3>
             <div id="conflictChart" class="chart"></div>
           </div>
         </div>
@@ -286,6 +363,129 @@
   </div>
 
   <script>
+    const I18N = {
+      zh: {
+        pageTitle: 'MDT 会诊控制台', headerTitle: 'MDT 控制台', wsConnecting: '连接中...', statusWaiting: '等待操作',
+        diagTitle: '连接诊断', retryModels: '重试加载模型', retryAgents: '重试加载 Agent',
+        consultInput: '会诊输入', msgPlaceholder: '输入临床问题...', enableDocs: '启用病历直读上下文', submitDiscussion: '提交讨论', reviewRound: '二轮互评', refreshConflict: '刷新冲突图',
+        uploadCaseTitle: '上传病历（文件/网址）', caseDocUrlPlaceholder: '病历网址（支持网页/PDF链接）', importCaseUrl: '导入网址病历', uploadCaseFile: '上传病历文件',
+        parsedPanelTitle: '病历解析结果面板（可编辑确认）', parsedPanelHint: '提交会诊前可确认/采纳影像、检验、用药条目',
+        imaging: '影像', labs: '检验', medications: '用药', addImaging: '+ 新增影像条目', addLabs: '+ 新增检验条目', addMeds: '+ 新增用药条目',
+        loadLatestParsed: '加载最近解析结果', clearPanel: '清空面板',
+        addAgentTitle: '新增 Agent', newAgentRolePlaceholder: '角色 e.g. 影像评估', newAgentPromptPlaceholder: '可选：自定义补充提示词', create: '新增',
+        feedKnowledgeTitle: '喂知识（文本/文件/网址）', feedContentPlaceholder: '粘贴指南/经验知识...', feedUrlPlaceholder: '知识网址（网页/PDF）', injectText: '注入文本', injectUrl: '注入网址', injectFile: '注入文件',
+        agentModelTitle: 'Agent 模型配置', agentsLoading: '当前 Agent: loading...',
+        tabRoom: '会诊室视图', tabAnalytics: '数据分析视图', timelineTitle: '实时时间线', speakerDist: '专家发言分布', consensusCurve: '共识收敛曲线', conflictGraph: '冲突关系图',
+        meetingTable: 'MDT 会诊桌（实时交互）', standby: '待命中',
+        confirmAdopt: '确认/采纳', delete: '删除', emptyItems: '暂无条目，可手动新增或先导入病历。', emptyItemWarn: '存在空条目，提交时会自动忽略。',
+        diagApiFmt: 'API: {api}', diagModelsFmt: 'models: {status} | {duration}ms | {time}', diagAgentsFmt: 'agents: {status} | {duration}ms | {time}',
+        diagPollFmt: '轮询: {active} | 最近成功: {last} | 当前间隔: {sec}s', pollOn: '启用', pollOff: '关闭',
+        diagWsFmt: 'WS readyState: {state} | last error: {err} | 最近握手: {time}', diagWsCloseFmt: 'WS close: code={code} reason={reason}',
+        reqFail: '请求失败',
+        needQuestion: '请先输入会诊问题',
+        panelCleared: '病历解析结果面板已清空',
+        noParsedDoc: '当前病例暂无解析病历', loadedLatest: '已加载最近病历解析结果（文档ID {id}）', loadFailed: '加载失败',
+        submitOk: '已提交讨论，生成 {count} 条响应（已带入确认条目 {picked} 条，病历上下文:{docsOn} 文档{docCount}份）', on: '开', off: '关', submitFail: '提交失败',
+        reviewOk: '二轮互评完成，新增 {count} 条事件', reviewFail: '二轮互评失败',
+        addAgentOk: '已新增 {id}（模型: {model}）；推荐技能: {skills}', addFail: '新增失败', none: '无',
+        modelMissingAgent: '模型配置失败：缺少 agent_id', modelUpdated: '已更新 {id} 模型为 {model}', modelUpdateFail: '模型更新失败',
+        feedTextOk: '已给 {id} 注入文本知识', feedFail: '喂知识失败', feedUrlOk: '已给 {id} 注入网址知识', feedUrlFail: '网址注入失败',
+        selectKnowledgeFile: '请先选择知识文件', feedFileOk: '已给 {id} 注入文件知识', feedFileFail: '文件注入失败',
+        caseImportDone: '病历导入完成，提取影像{imaging}条，检验{labs}条，用药{meds}条', caseImportFail: '病历网址导入失败',
+        selectCaseFile: '请先选择病历文件', caseUploadDone: '病历上传完成，提取影像{imaging}条，检验{labs}条，用药{meds}条', caseUploadFail: '病历文件导入失败',
+        defaultModelOpt: '默认模型（{model}）',
+        modelsFallback: '模型列表使用降级配置：{note}',
+        agentsListFmt: '当前 Agent({count}): {agents}', saveModel: '保存模型',
+        conflictFail: '加载冲突图失败',
+        modelsLoadOk: '模型列表加载成功', modelsLoadFail: '加载模型列表失败', agentsLoadOk: 'Agent 列表加载成功', agentsLoadFail: '加载 Agent 列表失败',
+        wsInit: '初始化中（WebSocket 优先）', wsInitHint: '已使用同源 API/WS；如反代路径特殊可加 ?api=http://host:port 覆盖', initDonePartial: '初始化完成（模型列表加载失败，可手动重试）',
+        wsConnectingState: 'WebSocket 连接中...', wsOpen: 'WebSocket 已连接（实时）', wsHandshakeTimeout: 'WebSocket 握手超时（降级轮询）', wsError: 'WebSocket 异常（降级轮询）', wsClosedFmt: 'WebSocket 断开（{reason}，降级轮询）',
+      },
+      en: {
+        pageTitle: 'MDT Consultation Console', headerTitle: 'MDT Console', wsConnecting: 'Connecting...', statusWaiting: 'Waiting for actions',
+        diagTitle: 'Connectivity Diagnostics', retryModels: 'Retry Models', retryAgents: 'Retry Agents',
+        consultInput: 'Consultation Input', msgPlaceholder: 'Enter clinical question...', enableDocs: 'Enable direct EMR context', submitDiscussion: 'Submit Discussion', reviewRound: 'Round-2 Peer Review', refreshConflict: 'Refresh Conflict Graph',
+        uploadCaseTitle: 'Upload Case Records (File/URL)', caseDocUrlPlaceholder: 'Case URL (web/PDF supported)', importCaseUrl: 'Import URL Record', uploadCaseFile: 'Upload Case File',
+        parsedPanelTitle: 'Parsed Case Panel (Editable Confirmation)', parsedPanelHint: 'Confirm/adopt imaging, labs and medication items before submission',
+        imaging: 'Imaging', labs: 'Labs', medications: 'Medications', addImaging: '+ Add Imaging Item', addLabs: '+ Add Lab Item', addMeds: '+ Add Medication Item',
+        loadLatestParsed: 'Load Latest Parsed Result', clearPanel: 'Clear Panel',
+        addAgentTitle: 'Add Agent', newAgentRolePlaceholder: 'Role e.g. Imaging Review', newAgentPromptPlaceholder: 'Optional: custom supplemental prompt', create: 'Create',
+        feedKnowledgeTitle: 'Feed Knowledge (Text/File/URL)', feedContentPlaceholder: 'Paste guidelines/experience...', feedUrlPlaceholder: 'Knowledge URL (web/PDF)', injectText: 'Inject Text', injectUrl: 'Inject URL', injectFile: 'Inject File',
+        agentModelTitle: 'Agent Model Settings', agentsLoading: 'Current Agents: loading...',
+        tabRoom: 'Conference Room View', tabAnalytics: 'Analytics View', timelineTitle: 'Real-time Timeline', speakerDist: 'Speaker Distribution', consensusCurve: 'Consensus Convergence', conflictGraph: 'Conflict Graph',
+        meetingTable: 'MDT Conference Table (Realtime)', standby: 'Standby',
+        confirmAdopt: 'Confirm/Adopt', delete: 'Delete', emptyItems: 'No items yet. Add manually or import a case record first.', emptyItemWarn: 'Empty items exist and will be ignored on submit.',
+        diagApiFmt: 'API: {api}', diagModelsFmt: 'models: {status} | {duration}ms | {time}', diagAgentsFmt: 'agents: {status} | {duration}ms | {time}',
+        diagPollFmt: 'polling: {active} | last success: {last} | interval: {sec}s', pollOn: 'on', pollOff: 'off',
+        diagWsFmt: 'WS readyState: {state} | last error: {err} | last handshake: {time}', diagWsCloseFmt: 'WS close: code={code} reason={reason}',
+        reqFail: 'Request failed',
+        needQuestion: 'Please enter a consultation question first',
+        panelCleared: 'Parsed panel has been cleared',
+        noParsedDoc: 'No parsed case records found for this case', loadedLatest: 'Latest parsed record loaded (Doc ID {id})', loadFailed: 'Load failed',
+        submitOk: 'Discussion submitted. {count} responses generated ({picked} confirmed items included, docs context:{docsOn} docs={docCount})', on: 'on', off: 'off', submitFail: 'Submit failed',
+        reviewOk: 'Round-2 review complete, {count} events added', reviewFail: 'Round-2 review failed',
+        addAgentOk: 'Agent {id} created (model: {model}); suggested skills: {skills}', addFail: 'Create agent failed', none: 'none',
+        modelMissingAgent: 'Model update failed: missing agent_id', modelUpdated: 'Updated {id} model to {model}', modelUpdateFail: 'Model update failed',
+        feedTextOk: 'Injected text knowledge into {id}', feedFail: 'Knowledge feed failed', feedUrlOk: 'Injected URL knowledge into {id}', feedUrlFail: 'URL injection failed',
+        selectKnowledgeFile: 'Please select a knowledge file first', feedFileOk: 'Injected file knowledge into {id}', feedFileFail: 'File injection failed',
+        caseImportDone: 'Case URL imported, extracted imaging {imaging}, labs {labs}, meds {meds}', caseImportFail: 'Case URL import failed',
+        selectCaseFile: 'Please select a case file first', caseUploadDone: 'Case file uploaded, extracted imaging {imaging}, labs {labs}, meds {meds}', caseUploadFail: 'Case file import failed',
+        defaultModelOpt: 'Default model ({model})',
+        modelsFallback: 'Model list uses fallback config: {note}',
+        agentsListFmt: 'Current Agents ({count}): {agents}', saveModel: 'Save',
+        conflictFail: 'Load conflict graph failed',
+        modelsLoadOk: 'Model list loaded', modelsLoadFail: 'Model list load failed', agentsLoadOk: 'Agent list loaded', agentsLoadFail: 'Agent list load failed',
+        wsInit: 'Initializing (WebSocket preferred)', wsInitHint: 'Using same-origin API/WS; append ?api=http://host:port if reverse-proxy path differs', initDonePartial: 'Initialization done (model list failed, retry manually)',
+        wsConnectingState: 'WebSocket connecting...', wsOpen: 'WebSocket connected (realtime)', wsHandshakeTimeout: 'WebSocket handshake timeout (fallback to polling)', wsError: 'WebSocket error (fallback to polling)', wsClosedFmt: 'WebSocket closed ({reason}, fallback to polling)',
+      }
+    };
+
+    let currentLang = localStorage.getItem('mdt_lang') || 'zh';
+    if (!['zh', 'en'].includes(currentLang)) currentLang = 'zh';
+
+    function tr(key, vars = {}) {
+      const dict = I18N[currentLang] || I18N.zh;
+      const fallback = I18N.zh[key] || key;
+      const tpl = dict[key] || fallback;
+      return String(tpl).replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? `{${k}}`));
+    }
+
+    function applyI18n() {
+      document.documentElement.lang = currentLang === 'zh' ? 'zh-CN' : 'en';
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (key) el.textContent = tr(key);
+      });
+      document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+        const key = el.getAttribute('data-i18n-ph');
+        if (key) el.placeholder = tr(key);
+      });
+      document.title = tr('pageTitle');
+      const zhBtn = document.getElementById('lang-zh');
+      const enBtn = document.getElementById('lang-en');
+      zhBtn.classList.toggle('active', currentLang === 'zh');
+      enBtn.classList.toggle('active', currentLang === 'en');
+      updateDiagnostics();
+      renderSectionPanel();
+      renderRoom();
+      renderCharts();
+    }
+
+    function setLanguage(lang) {
+      if (!['zh', 'en'].includes(lang)) return;
+      currentLang = lang;
+      localStorage.setItem('mdt_lang', lang);
+      applyI18n();
+    }
+
+    function setWsState(text, level = 'warn') {
+      wsState.textContent = text;
+      wsState.classList.remove('ok', 'warn', 'bad');
+      wsState.classList.add(level);
+    }
+
+    function setStatusText(text) { statusEl.textContent = text; }
+
     const BASE_HOST = location.hostname || '127.0.0.1';
     const PAGE_PROTO = location.protocol;
     const WS_PROTO = PAGE_PROTO === 'https:' ? 'wss' : 'ws';
@@ -339,47 +539,44 @@
     };
 
     const AGENT_PERSONA = {
-      'mdt-orchestrator': { emoji: '🎯', title: '会诊主持人', vibe: '冷静统筹型' },
-      'mdt-id': { emoji: '🦠', title: '感染科主任', vibe: '耐药策略型' },
-      'mdt-micro': { emoji: '🧫', title: '微生物专家', vibe: '证据谨慎型' },
-      'mdt-pharm': { emoji: '💊', title: '临床药师', vibe: '剂量精算型' },
-      'mdt-icu': { emoji: '🫀', title: 'ICU医生', vibe: '高危监护型' },
-      'mdt-evidence': { emoji: '📚', title: '循证秘书', vibe: '文献归纳型' },
-      'mdt-radiology': { emoji: '🩻', title: '影像科医生', vibe: '征象判读型' },
-      'mdt-lab': { emoji: '🧪', title: '检验科医生', vibe: '指标趋势型' },
-      'human_clinician': { emoji: '👨‍⚕️', title: '临床医生', vibe: '病例提出者' },
+      'mdt-orchestrator': { emoji: '🎯', title_zh: '会诊主持人', title_en: 'Orchestrator', vibe: '冷静统筹型' },
+      'mdt-id': { emoji: '🦠', title_zh: '感染科主任', title_en: 'ID Specialist', vibe: '耐药策略型' },
+      'mdt-micro': { emoji: '🧫', title_zh: '微生物专家', title_en: 'Microbiology', vibe: '证据谨慎型' },
+      'mdt-pharm': { emoji: '💊', title_zh: '临床药师', title_en: 'Clinical Pharmacist', vibe: '剂量精算型' },
+      'mdt-icu': { emoji: '🫀', title_zh: 'ICU医生', title_en: 'ICU Specialist', vibe: '高危监护型' },
+      'mdt-evidence': { emoji: '📚', title_zh: '循证秘书', title_en: 'Evidence Officer', vibe: '文献归纳型' },
+      'mdt-radiology': { emoji: '🩻', title_zh: '影像科医生', title_en: 'Radiology', vibe: '征象判读型' },
+      'mdt-lab': { emoji: '🧪', title_zh: '检验科医生', title_en: 'Lab Specialist', vibe: '指标趋势型' },
+      'human_clinician': { emoji: '👨‍⚕️', title_zh: '临床医生', title_en: 'Clinician', vibe: '病例提出者' },
     };
 
     const seats = [
-      { id: 'mdt-orchestrator', x: 50, y: 12, label: '主持人' },
-      { id: 'mdt-id', x: 18, y: 28, label: '感染科' },
-      { id: 'mdt-micro', x: 82, y: 28, label: '微生物' },
-      { id: 'mdt-pharm', x: 18, y: 72, label: '药学' },
-      { id: 'mdt-icu', x: 82, y: 72, label: 'ICU' },
-      { id: 'mdt-evidence', x: 50, y: 88, label: '循证秘书' },
-      { id: 'human_clinician', x: 50, y: 50, label: '临床输入' },
+      { id: 'mdt-orchestrator', x: 50, y: 12, label_zh: '主持人', label_en: 'Host' },
+      { id: 'mdt-id', x: 18, y: 28, label_zh: '感染科', label_en: 'ID' },
+      { id: 'mdt-micro', x: 82, y: 28, label_zh: '微生物', label_en: 'Micro' },
+      { id: 'mdt-pharm', x: 18, y: 72, label_zh: '药学', label_en: 'Pharm' },
+      { id: 'mdt-icu', x: 82, y: 72, label_zh: 'ICU', label_en: 'ICU' },
+      { id: 'mdt-evidence', x: 50, y: 88, label_zh: '循证秘书', label_en: 'Evidence' },
+      { id: 'human_clinician', x: 50, y: 50, label_zh: '临床输入', label_en: 'Clinical Input' },
     ];
     const seatState = new Map();
 
     const SECTION_KEYS = ['imaging', 'labs', 'medications'];
-    const sectionPanelState = {
-      imaging: [],
-      labs: [],
-      medications: [],
-    };
+    const sectionPanelState = { imaging: [], labs: [], medications: [] };
 
     function renderRoom() {
-      room.innerHTML = `<div class="meeting-table">MDT 会诊桌（实时交互）</div>`;
+      room.innerHTML = `<div class="meeting-table">${tr('meetingTable')}</div>`;
       seats.forEach(s => {
-        const st = seatState.get(s.id) || { cls: '', text: '待命中' };
+        const st = seatState.get(s.id) || { cls: '', text: tr('standby') };
         const div = document.createElement('div');
         div.className = `seat ${st.cls}`;
         div.style.left = s.x + '%';
         div.style.top = s.y + '%';
-        const p = AGENT_PERSONA[s.id] || { emoji: '🤖', title: s.label || s.id, vibe: '通用专家' };
+        const p = AGENT_PERSONA[s.id] || { emoji: '🤖', title_zh: s.label_zh || s.id, title_en: s.label_en || s.id, vibe: '通用专家' };
+        const title = currentLang === 'en' ? p.title_en : p.title_zh;
         div.innerHTML = `
           <div class="avatar" title="${p.vibe}">${p.emoji}</div>
-          <div class="name">${p.title}</div>
+          <div class="name">${title}</div>
           <div class="muted" style="font-size:11px">${s.id}</div>
           <div class="bubble">${st.text}</div>
         `;
@@ -405,15 +602,16 @@
     }
 
     function updateDiagnostics() {
-      diagApi.textContent = `API: ${API}`;
-      diagModels.textContent = `models: ${diagState.models.status} | ${diagState.models.durationMs}ms | ${formatTime(diagState.models.at)}`;
-      diagAgents.textContent = `agents: ${diagState.agents.status} | ${diagState.agents.durationMs}ms | ${formatTime(diagState.agents.at)}`;
-      diagPoll.textContent = `轮询: ${diagState.pollActive ? '启用' : '关闭'} | 最近成功: ${formatTime(diagState.pollLastSuccess)} | 当前间隔: ${pollBackoffDelays[pollBackoffIndex] / 1000}s`;
-      diagWs.textContent = `WS readyState: ${diagState.wsReadyState} | last error: ${diagState.wsLastError} | 最近握手: ${formatTime(diagState.wsLastHandshakeAt)}`;
-      diagWsClose.textContent = `WS close: code=${diagState.wsCloseCode} reason=${diagState.wsCloseReason || '-'}`;
+      diagApi.textContent = tr('diagApiFmt', { api: API });
+      diagModels.textContent = tr('diagModelsFmt', { status: diagState.models.status, duration: diagState.models.durationMs, time: formatTime(diagState.models.at) });
+      diagAgents.textContent = tr('diagAgentsFmt', { status: diagState.agents.status, duration: diagState.agents.durationMs, time: formatTime(diagState.agents.at) });
+      diagPoll.textContent = tr('diagPollFmt', { active: diagState.pollActive ? tr('pollOn') : tr('pollOff'), last: formatTime(diagState.pollLastSuccess), sec: pollBackoffDelays[pollBackoffIndex] / 1000 });
+      diagWs.textContent = tr('diagWsFmt', { state: diagState.wsReadyState, err: diagState.wsLastError, time: formatTime(diagState.wsLastHandshakeAt) });
+      diagWsClose.textContent = tr('diagWsCloseFmt', { code: diagState.wsCloseCode, reason: diagState.wsCloseReason || '-' });
     }
 
-    function toErrorMessage(err, context = '请求失败') {
+    function toErrorMessage(err, contextKey = 'reqFail') {
+      const context = tr(contextKey);
       if (!err) return context;
       if (err.message) return `${context}: ${err.message}`;
       return `${context}: ${String(err)}`;
@@ -425,11 +623,7 @@
         const resp = await fetch(`${API}${path}`, options);
         const durationMs = Math.round(performance.now() - started);
         let data = null;
-        try {
-          data = await resp.json();
-        } catch (_) {
-          data = null;
-        }
+        try { data = await resp.json(); } catch (_) { data = null; }
 
         if (metaKey && diagState[metaKey]) {
           diagState[metaKey] = { status: `HTTP ${resp.status}`, durationMs, at: Date.now() };
@@ -452,11 +646,7 @@
     }
 
     function normalizeSectionItems(items) {
-      return (items || [])
-        .map(it => {
-          if (typeof it === 'string') return { text: it, confirmed: true };
-          return { text: String(it?.text || ''), confirmed: Boolean(it?.confirmed) };
-        })
+      return (items || []).map(it => (typeof it === 'string' ? { text: it, confirmed: true } : { text: String(it?.text || ''), confirmed: Boolean(it?.confirmed) }))
         .filter(it => it.text.trim().length > 0);
     }
 
@@ -467,7 +657,7 @@
       err.textContent = '';
       const list = sectionPanelState[key] || [];
       if (!list.length) {
-        box.innerHTML = `<div class="empty-tip">暂无条目，可手动新增或先导入病历。</div>`;
+        box.innerHTML = `<div class="empty-tip">${tr('emptyItems')}</div>`;
         return;
       }
       box.innerHTML = '';
@@ -475,53 +665,40 @@
         const node = document.createElement('div');
         node.className = 'section-item';
         node.innerHTML = `
-          <textarea placeholder="请输入条目内容">${item.text || ''}</textarea>
+          <textarea placeholder="${currentLang === 'en' ? 'Enter item text...' : '请输入条目内容'}">${item.text || ''}</textarea>
           <div class="item-row">
             <label class="check-inline">
               <input type="checkbox" ${item.confirmed ? 'checked' : ''} />
-              确认/采纳
+              ${tr('confirmAdopt')}
             </label>
-            <button class="item-del" onclick="removeSectionItem('${key}', ${idx})">删除</button>
+            <button class="item-del" onclick="removeSectionItem('${key}', ${idx})">${tr('delete')}</button>
           </div>
         `;
         const ta = node.querySelector('textarea');
         const ck = node.querySelector('input[type="checkbox"]');
         ta.addEventListener('input', () => {
           sectionPanelState[key][idx].text = ta.value;
-          if (!ta.value.trim()) err.textContent = '存在空条目，提交时会自动忽略。';
+          if (!ta.value.trim()) err.textContent = tr('emptyItemWarn');
         });
-        ck.addEventListener('change', () => {
-          sectionPanelState[key][idx].confirmed = ck.checked;
-        });
+        ck.addEventListener('change', () => { sectionPanelState[key][idx].confirmed = ck.checked; });
         box.appendChild(node);
       });
     }
 
-    function renderSectionPanel() {
-      SECTION_KEYS.forEach(renderSectionColumn);
-    }
+    function renderSectionPanel() { SECTION_KEYS.forEach(renderSectionColumn); }
 
     function applySections(sections = {}) {
-      SECTION_KEYS.forEach(key => {
-        sectionPanelState[key] = normalizeSectionItems(sections[key] || []).map(it => ({ ...it }));
-      });
+      SECTION_KEYS.forEach(key => { sectionPanelState[key] = normalizeSectionItems(sections[key] || []).map(it => ({ ...it })); });
       renderSectionPanel();
     }
 
-    function addSectionItem(key) {
-      sectionPanelState[key].push({ text: '', confirmed: true });
-      renderSectionColumn(key);
-    }
-
-    function removeSectionItem(key, idx) {
-      sectionPanelState[key].splice(idx, 1);
-      renderSectionColumn(key);
-    }
+    function addSectionItem(key) { sectionPanelState[key].push({ text: '', confirmed: true }); renderSectionColumn(key); }
+    function removeSectionItem(key, idx) { sectionPanelState[key].splice(idx, 1); renderSectionColumn(key); }
 
     function resetSectionPanel() {
       SECTION_KEYS.forEach(key => { sectionPanelState[key] = []; });
       renderSectionPanel();
-      statusEl.textContent = '病历解析结果面板已清空';
+      setStatusText(tr('panelCleared'));
     }
 
     function getConfirmedSectionsPayload() {
@@ -541,13 +718,13 @@
         const latest = (data.documents || [])[0];
         if (!latest) {
           resetSectionPanel();
-          statusEl.textContent = '当前病例暂无解析病历';
+          setStatusText(tr('noParsedDoc'));
           return;
         }
         applySections(latest.sections || {});
-        statusEl.textContent = `已加载最近病历解析结果（文档ID ${latest.id}）`;
+        setStatusText(tr('loadedLatest', { id: latest.id }));
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '加载失败');
+        setStatusText(toErrorMessage(e, 'loadFailed'));
       }
     }
 
@@ -563,7 +740,7 @@
       seatState.set(id, { cls, text });
       if (!seats.find(x => x.id === id)) {
         const pos = [15,30,45,60,75,90][(seats.length - 7) % 6];
-        seats.push({ id, x: pos, y: 50, label: id });
+        seats.push({ id, x: pos, y: 50, label_zh: id, label_en: id });
       }
       renderRoom();
     }
@@ -601,41 +778,17 @@
       updateSeat(ev);
     }
 
-    function clearPing() {
-      if (pingTimer) clearInterval(pingTimer);
-      pingTimer = null;
-    }
-
-    function scheduleNextPoll(delayMs = pollBackoffDelays[pollBackoffIndex]) {
-      if (pollTimer) clearTimeout(pollTimer);
-      pollTimer = setTimeout(loadEventsFallback, delayMs);
-      updateDiagnostics();
-    }
-
-    function startPollingFallback() {
-      diagState.pollActive = true;
-      scheduleNextPoll(0);
-    }
-
-    function stopPollingFallback() {
-      if (pollTimer) clearTimeout(pollTimer);
-      pollTimer = null;
-      pollBackoffIndex = 0;
-      diagState.pollActive = false;
-      updateDiagnostics();
-    }
+    function clearPing() { if (pingTimer) clearInterval(pingTimer); pingTimer = null; }
+    function scheduleNextPoll(delayMs = pollBackoffDelays[pollBackoffIndex]) { if (pollTimer) clearTimeout(pollTimer); pollTimer = setTimeout(loadEventsFallback, delayMs); updateDiagnostics(); }
+    function startPollingFallback() { diagState.pollActive = true; scheduleNextPoll(0); }
+    function stopPollingFallback() { if (pollTimer) clearTimeout(pollTimer); pollTimer = null; pollBackoffIndex = 0; diagState.pollActive = false; updateDiagnostics(); }
 
     async function loadEventsFallback() {
       const caseId = document.getElementById('caseId').value.trim();
-      if (!caseId) {
-        scheduleNextPoll();
-        return;
-      }
+      if (!caseId) { scheduleNextPoll(); return; }
       try {
         const { data } = await requestWithMeta(`/cases/${caseId}/events`);
-        (data?.events || []).forEach(ev => {
-          if (!seenEventIds.has(ev.event_id)) addEvent(ev);
-        });
+        (data?.events || []).forEach(ev => { if (!seenEventIds.has(ev.event_id)) addEvent(ev); });
         pollBackoffIndex = 0;
         diagState.pollLastSuccess = Date.now();
       } catch (_) {
@@ -649,17 +802,13 @@
       if (forcePolling) return;
       if (wsReconnectTimer) return;
       const delay = wsReconnectDelays[Math.min(wsReconnectAttempt, wsReconnectDelays.length - 1)];
-      wsReconnectTimer = setTimeout(() => {
-        wsReconnectTimer = null;
-        connectWS();
-      }, delay);
+      wsReconnectTimer = setTimeout(() => { wsReconnectTimer = null; connectWS(); }, delay);
     }
 
     function connectWS() {
       if (forcePolling) return;
       if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
-      wsState.textContent = 'WebSocket 连接中...';
-      wsState.style.background = 'rgba(243,156,18,.2)';
+      setWsState(tr('wsConnectingState'), 'warn');
       diagState.wsReadyState = 'CONNECTING';
       updateDiagnostics();
 
@@ -668,9 +817,8 @@
       if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
       wsConnectTimeout = setTimeout(() => {
         if (ws && ws.readyState === WebSocket.CONNECTING) {
-          diagState.wsLastError = '握手超时(3s)';
-          wsState.textContent = 'WebSocket 握手超时（降级轮询）';
-          wsState.style.background = 'rgba(255,95,109,.2)';
+          diagState.wsLastError = 'handshake_timeout(3s)';
+          setWsState(tr('wsHandshakeTimeout'), 'bad');
           startPollingFallback();
           updateDiagnostics();
           try { ws.close(4000, 'handshake timeout'); } catch (_) {}
@@ -685,8 +833,7 @@
         diagState.wsCloseCode = '-';
         diagState.wsCloseReason = '-';
         diagState.wsLastHandshakeAt = Date.now();
-        wsState.textContent = 'WebSocket 已连接（实时）';
-        wsState.style.background = 'rgba(46,204,113,.2)';
+        setWsState(tr('wsOpen'), 'ok');
         stopPollingFallback();
         clearPing();
         try { ws.send(JSON.stringify({ type: 'ping', ts: Date.now() })); } catch (_) {}
@@ -701,8 +848,7 @@
         if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
         diagState.wsReadyState = wsReadyStateLabel(ws?.readyState);
         diagState.wsLastError = evt?.message || 'WebSocket onerror';
-        wsState.textContent = 'WebSocket 异常（降级轮询）';
-        wsState.style.background = 'rgba(255,95,109,.2)';
+        setWsState(tr('wsError'), 'bad');
         startPollingFallback();
         updateDiagnostics();
       };
@@ -714,8 +860,7 @@
         diagState.wsCloseCode = evt?.code ?? '-';
         diagState.wsCloseReason = evt?.reason || '-';
         const reasonText = `code=${diagState.wsCloseCode} reason=${diagState.wsCloseReason}`;
-        wsState.textContent = `WebSocket 断开（${reasonText}，降级轮询）`;
-        wsState.style.background = 'rgba(255,95,109,.2)';
+        setWsState(tr('wsClosedFmt', { reason: reasonText }), 'bad');
         startPollingFallback();
         wsReconnectAttempt += 1;
         updateDiagnostics();
@@ -724,15 +869,8 @@
 
       ws.onmessage = (msg) => {
         let payload = null;
-        try {
-          payload = JSON.parse(msg.data);
-        } catch (_) {
-          return;
-        }
-        if (payload.type === 'mdt_event') {
-          addEvent(payload.data);
-          return;
-        }
+        try { payload = JSON.parse(msg.data); } catch (_) { return; }
+        if (payload.type === 'mdt_event') { addEvent(payload.data); return; }
         if (payload.type === 'pong') {
           diagState.wsLastHandshakeAt = Date.now();
           updateDiagnostics();
@@ -743,13 +881,10 @@
     async function submitDiscussion() {
       const caseId = document.getElementById('caseId').value.trim();
       const message = document.getElementById('msg').value.trim();
-      if (!message) { statusEl.textContent = '请先输入会诊问题'; return; }
+      if (!message) { setStatusText(tr('needQuestion')); return; }
       const confirmedSections = getConfirmedSectionsPayload();
       try {
-        await requestWithMeta('/cases/open', {
-          method: 'POST', headers: {'content-type': 'application/json'},
-          body: JSON.stringify({case_id: caseId, patient_summary: {note: 'interactive case'}})
-        });
+        await requestWithMeta('/cases/open', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({case_id: caseId, patient_summary: {note: 'interactive case'}}) });
         const { data } = await requestWithMeta('/discussion/submit', {
           method: 'POST', headers: {'content-type': 'application/json'},
           body: JSON.stringify({
@@ -762,10 +897,9 @@
           })
         });
         const picked = Object.values(confirmedSections).reduce((n, arr) => n + (arr || []).filter(x => x.confirmed).length, 0);
-        const docsInfo = `病历上下文:${data.docs_context_enabled ? '开' : '关'} 文档${data.docs_context_doc_count ?? 0}份`;
-        statusEl.textContent = `已提交讨论，生成 ${data.generated_count} 条响应（已带入确认条目 ${picked} 条，${docsInfo}）`;
+        setStatusText(tr('submitOk', { count: data.generated_count, picked, docsOn: data.docs_context_enabled ? tr('on') : tr('off'), docCount: data.docs_context_doc_count ?? 0 }));
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '提交失败');
+        setStatusText(toErrorMessage(e, 'submitFail'));
       }
     }
 
@@ -776,10 +910,10 @@
           method: 'POST', headers: {'content-type':'application/json'},
           body: JSON.stringify({case_id: caseId, from_round: 1, to_round: 2})
         });
-        statusEl.textContent = `二轮互评完成，新增 ${data.generated_count} 条事件`;
+        setStatusText(tr('reviewOk', { count: data.generated_count }));
         await loadConflictGraph();
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '二轮互评失败');
+        setStatusText(toErrorMessage(e, 'reviewFail'));
       }
     }
 
@@ -794,26 +928,26 @@
           method:'POST', headers:{'content-type':'application/json'},
           body: JSON.stringify({agent_id, role, specialty, model, prompt, auto_learn_web: true})
         });
-        statusEl.textContent = `已新增 ${agent_id}（模型: ${data.model || '默认'}）；推荐技能: ${(data.skill_suggestions || []).join(', ') || '无'}`;
+        setStatusText(tr('addAgentOk', { id: agent_id, model: data.model || tr('defaultModelOpt', { model: defaultModel }), skills: (data.skill_suggestions || []).join(', ') || tr('none') }));
         await loadAgents();
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '新增失败');
+        setStatusText(toErrorMessage(e, 'addFail'));
       }
     }
 
     async function updateAgentModel(agent_id, model) {
       const targetAgent = (agent_id || '').trim();
       const targetModel = typeof model === 'string' ? model.trim() : '';
-      if (!targetAgent) { statusEl.textContent = '模型配置失败：缺少 agent_id'; return; }
+      if (!targetAgent) { setStatusText(tr('modelMissingAgent')); return; }
       try {
         const { data } = await requestWithMeta(`/agents/${targetAgent}/model`, {
           method:'POST', headers:{'content-type':'application/json'},
           body: JSON.stringify({model: targetModel})
         });
-        statusEl.textContent = `已更新 ${targetAgent} 模型为 ${data.model || '默认模型'}`;
+        setStatusText(tr('modelUpdated', { id: targetAgent, model: data.model || tr('defaultModelOpt', { model: defaultModel }) }));
         await loadAgents();
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '模型更新失败');
+        setStatusText(toErrorMessage(e, 'modelUpdateFail'));
       }
     }
 
@@ -826,9 +960,9 @@
           method:'POST', headers:{'content-type':'application/json'},
           body: JSON.stringify({source, content, tags:[]})
         });
-        statusEl.textContent = `已给 ${agent_id} 注入文本知识`;
+        setStatusText(tr('feedTextOk', { id: agent_id }));
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '喂知识失败');
+        setStatusText(toErrorMessage(e, 'feedFail'));
       }
     }
 
@@ -840,24 +974,24 @@
           method:'POST', headers:{'content-type':'application/json'},
           body: JSON.stringify({url, source:'url'})
         });
-        statusEl.textContent = `已给 ${agent_id} 注入网址知识`;
+        setStatusText(tr('feedUrlOk', { id: agent_id }));
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '网址注入失败');
+        setStatusText(toErrorMessage(e, 'feedUrlFail'));
       }
     }
 
     async function feedKnowledgeFile() {
       const agent_id = document.getElementById('feedAgentId').value.trim();
       const f = document.getElementById('feedFile').files[0];
-      if (!f) { statusEl.textContent = '请先选择知识文件'; return; }
+      if (!f) { setStatusText(tr('selectKnowledgeFile')); return; }
       const fd = new FormData();
       fd.append('file', f);
       fd.append('tags', 'file,upload');
       try {
         await requestWithMeta(`/agents/${agent_id}/knowledge/upload`, { method:'POST', body: fd });
-        statusEl.textContent = `已给 ${agent_id} 注入文件知识`;
+        setStatusText(tr('feedFileOk', { id: agent_id }));
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '文件注入失败');
+        setStatusText(toErrorMessage(e, 'feedFileFail'));
       }
     }
 
@@ -870,30 +1004,30 @@
           body: JSON.stringify({url, source:'url'})
         });
         applySections(data.sections || {});
-        statusEl.textContent = `病历导入完成，提取影像${(data.sections?.imaging||[]).length}条，检验${(data.sections?.labs||[]).length}条，用药${(data.sections?.medications||[]).length}条`;
+        setStatusText(tr('caseImportDone', { imaging: (data.sections?.imaging||[]).length, labs: (data.sections?.labs||[]).length, meds: (data.sections?.medications||[]).length }));
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '病历网址导入失败');
+        setStatusText(toErrorMessage(e, 'caseImportFail'));
       }
     }
 
     async function uploadCaseDocFile() {
       const caseId = document.getElementById('caseId').value.trim();
       const f = document.getElementById('caseDocFile').files[0];
-      if (!f) { statusEl.textContent = '请先选择病历文件'; return; }
+      if (!f) { setStatusText(tr('selectCaseFile')); return; }
       const fd = new FormData();
       fd.append('file', f);
       try {
         const { data } = await requestWithMeta(`/cases/${caseId}/documents/upload`, { method:'POST', body: fd });
         applySections(data.sections || {});
-        statusEl.textContent = `病历上传完成，提取影像${(data.sections?.imaging||[]).length}条，检验${(data.sections?.labs||[]).length}条，用药${(data.sections?.medications||[]).length}条`;
+        setStatusText(tr('caseUploadDone', { imaging: (data.sections?.imaging||[]).length, labs: (data.sections?.labs||[]).length, meds: (data.sections?.medications||[]).length }));
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '病历文件导入失败');
+        setStatusText(toErrorMessage(e, 'caseUploadFail'));
       }
     }
 
     function modelOptionsHtml(selectedValue = '') {
       const selected = (selectedValue || '').trim();
-      const opts = [`<option value="">默认模型（${defaultModel}）</option>`];
+      const opts = [`<option value="">${tr('defaultModelOpt', { model: defaultModel })}</option>`];
       (availableModels || []).forEach(m => {
         const safe = String(m || '');
         const sel = safe === selected ? 'selected' : '';
@@ -909,9 +1043,7 @@
 
       const newAgentModel = document.getElementById('newAgentModel');
       newAgentModel.innerHTML = modelOptionsHtml('');
-      if (data.fallback) {
-        statusEl.textContent = `模型列表使用降级配置：${data.note || 'fallback'}`;
-      }
+      if (data.fallback) setStatusText(tr('modelsFallback', { note: data.note || 'fallback' }));
     }
 
     async function saveAgentModel(agentId, inputId) {
@@ -921,23 +1053,26 @@
           method:'POST', headers:{'content-type':'application/json'},
           body: JSON.stringify({ model })
         });
-        statusEl.textContent = `已更新 ${agentId} 模型为 ${data.model || '默认'}`;
+        setStatusText(tr('modelUpdated', { id: agentId, model: data.model || tr('defaultModelOpt', { model: defaultModel }) }));
         await loadAgents();
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '模型更新失败');
+        setStatusText(toErrorMessage(e, 'modelUpdateFail'));
       }
     }
 
     async function loadAgents() {
       const { data } = await requestWithMeta('/agents', {}, 'agents');
-      document.getElementById('agentsList').textContent = `当前 Agent(${data.count}): ` + data.agents.map(a => `${a.agent_id}[${a.specialty}]`).join(' | ');
+      document.getElementById('agentsList').textContent = tr('agentsListFmt', {
+        count: data.count,
+        agents: data.agents.map(a => `${a.agent_id}[${a.specialty}]`).join(' | ')
+      });
 
       const modelBox = document.getElementById('agentModelList');
       modelBox.innerHTML = '';
       data.agents.forEach((a, i) => {
         if (!seats.find(s => s.id === a.agent_id)) {
           const posX = [10, 22, 34, 66, 78, 90][i % 6];
-          seats.push({ id: a.agent_id, x: posX, y: 10 + ((Math.floor(i/6)%3) * 36), label: a.specialty || a.agent_id });
+          seats.push({ id: a.agent_id, x: posX, y: 10 + ((Math.floor(i/6)%3) * 36), label_zh: a.specialty || a.agent_id, label_en: a.specialty || a.agent_id });
         }
 
         const row = document.createElement('div');
@@ -945,7 +1080,7 @@
         const inputId = `agent-model-${a.agent_id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
         row.innerHTML = `
           <select id="${inputId}">${modelOptionsHtml(a.model || '')}</select>
-          <button onclick="saveAgentModel('${a.agent_id}', '${inputId}')">保存模型</button>
+          <button onclick="saveAgentModel('${a.agent_id}', '${inputId}')">${tr('saveModel')}</button>
         `;
         modelBox.appendChild(row);
       });
@@ -964,12 +1099,9 @@
           lineStyle: { color: e.stance === 'oppose' ? '#ff5f6d' : '#2ecc71', width: 2 },
           label: { show: true, formatter: e.stance }
         }));
-        conflictChart.setOption({
-          tooltip: {},
-          series: [{ type: 'graph', layout: 'force', roam: true, label: { show: true, color: '#dbe6ff' }, data: nodes, links }]
-        });
+        conflictChart.setOption({ tooltip: {}, series: [{ type: 'graph', layout: 'force', roam: true, label: { show: true, color: '#dbe6ff' }, data: nodes, links }] });
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '加载冲突图失败');
+        setStatusText(toErrorMessage(e, 'conflictFail'));
       }
     }
 
@@ -987,46 +1119,36 @@
       try {
         await loadAvailableModels();
         await loadAgents();
-        statusEl.textContent = '模型列表加载成功';
+        setStatusText(tr('modelsLoadOk'));
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '加载模型列表失败');
+        setStatusText(toErrorMessage(e, 'modelsLoadFail'));
       }
     }
 
     async function retryLoadAgents() {
       try {
         await loadAgents();
-        statusEl.textContent = 'Agent 列表加载成功';
+        setStatusText(tr('agentsLoadOk'));
       } catch (e) {
-        statusEl.textContent = toErrorMessage(e, '加载 Agent 列表失败');
+        setStatusText(toErrorMessage(e, 'agentsLoadFail'));
       }
     }
 
     async function initPage() {
+      applyI18n();
       renderRoom();
       renderSectionPanel();
       updateDiagnostics();
 
-      // 启动时优先 WebSocket，只有握手失败/中断才降级轮询
-      wsState.textContent = '初始化中（WebSocket 优先）';
-      wsState.style.background = 'rgba(243,156,18,.2)';
+      setWsState(tr('wsInit'), 'warn');
       stopPollingFallback();
       connectWS();
-      if (!IS_LOCAL && !API_OVERRIDE) {
-        statusEl.textContent = '已使用同源 API/WS；如反代路径特殊可加 ?api=http://host:port 覆盖';
-      }
+      if (!IS_LOCAL && !API_OVERRIDE) setStatusText(tr('wsInitHint'));
 
-      // 先加载模型，再渲染 Agent，下拉才能显示完整模型集
       Promise.allSettled([loadAvailableModels()]).then(async (results) => {
         const failed = results.filter(r => r.status === 'rejected').length;
-        try {
-          await loadAgents();
-        } catch (_) {
-          // 错误由 loadAgents 内部提示
-        }
-        if (failed > 0) {
-          statusEl.textContent = `初始化完成（模型列表加载失败，可手动重试）`;
-        }
+        try { await loadAgents(); } catch (_) {}
+        if (failed > 0) setStatusText(tr('initDonePartial'));
       });
     }
 
