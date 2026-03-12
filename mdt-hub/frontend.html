@@ -932,8 +932,8 @@
       renderSectionPanel();
       updateDiagnostics();
 
-      // 当前环境下 WebSocket 不稳定，默认走轮询确保可用
-      wsState.textContent = '轮询模式（WebSocket 已停用）';
+      // 启动时先开轮询兜底，再尝试建立 WebSocket；成功后会自动停止轮询
+      wsState.textContent = '初始化中（轮询兜底 + WebSocket 尝试连接）';
       wsState.style.background = 'rgba(243,156,18,.2)';
       startPollingFallback();
       connectWS();
