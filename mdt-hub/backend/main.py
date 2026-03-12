@@ -6,6 +6,7 @@ import logging
 import re
 import sqlite3
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -40,7 +41,7 @@ FALLBACK_MODEL_OPTIONS = [
     "anthropic/claude-3-7-sonnet",
     "google/gemini-2.5-pro",
 ]
-logger = logging.getLogger("mdt_hub")
+logger = logging.getLogger("uvicorn.error")
 OBSERVED_PATH_PATTERNS = [
     re.compile(r"^/models/available$"),
     re.compile(r"^/agents$"),
@@ -128,24 +129,52 @@ class AgentModelUpdate(BaseModel):
 class WSManager:
     def __init__(self) -> None:
         self.clients: list[WebSocket] = []
+        self.client_ids: dict[WebSocket, str] = {}
 
-    async def connect(self, ws: WebSocket) -> None:
+    async def connect(self, ws: WebSocket) -> str:
         await ws.accept()
         self.clients.append(ws)
+        client_id = uuid.uuid4().hex[:12]
+        self.client_ids[ws] = client_id
+        client_host = ws.client.host if ws.client else "unknown"
+        user_agent = ws.headers.get("user-agent", "-")
+        forwarded_for = ws.headers.get("x-forwarded-for", "-")
+        logger.info(
+            "ws connected client_id=%s host=%s ua=%s xff=%s active=%s",
+            client_id,
+            client_host,
+            user_agent,
+            forwarded_for,
+            len(self.clients),
+        )
+        return client_id
 
-    def disconnect(self, ws: WebSocket) -> None:
+    def disconnect(self, ws: WebSocket, *, reason: str = "unknown", close_code: Optional[int] = None) -> None:
+        client_id = self.client_ids.pop(ws, "unknown")
         if ws in self.clients:
             self.clients.remove(ws)
+        logger.info(
+            "ws disconnected client_id=%s code=%s reason=%s active=%s",
+            client_id,
+            close_code,
+            reason,
+            len(self.clients),
+        )
 
     async def broadcast(self, message: dict[str, Any]) -> None:
         dead: list[WebSocket] = []
         for c in self.clients:
             try:
                 await c.send_json(message)
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "ws broadcast failed client_id=%s err=%s",
+                    self.client_ids.get(c, "unknown"),
+                    exc,
+                )
                 dead.append(c)
         for c in dead:
-            self.disconnect(c)
+            self.disconnect(c, reason="broadcast_failed")
 
 
 ws_manager = WSManager()
@@ -1035,9 +1064,30 @@ def list_case_events(case_id: str) -> dict[str, Any]:
 
 @app.websocket("/ws/events")
 async def ws_events(websocket: WebSocket) -> None:
-    await ws_manager.connect(websocket)
+    client_id = await ws_manager.connect(websocket)
     try:
         while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
+            msg = await websocket.receive()
+            msg_type = msg.get("type")
+            if msg_type == "websocket.disconnect":
+                ws_manager.disconnect(
+                    websocket,
+                    reason="client_disconnect",
+                    close_code=msg.get("code"),
+                )
+                break
+
+            text = msg.get("text")
+            if text:
+                try:
+                    payload = json.loads(text)
+                except Exception:
+                    payload = text
+                if payload == "ping" or (isinstance(payload, dict) and payload.get("type") == "ping"):
+                    await websocket.send_json({"type": "pong", "ts": int(time.time() * 1000)})
+                    logger.debug("ws ping ack client_id=%s", client_id)
+    except WebSocketDisconnect as exc:
+        ws_manager.disconnect(websocket, reason="WebSocketDisconnect", close_code=exc.code)
+    except Exception as exc:
+        logger.exception("ws error client_id=%s err=%s", client_id, exc)
+        ws_manager.disconnect(websocket, reason=f"exception:{type(exc).__name__}")

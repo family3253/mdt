@@ -8,3 +8,4 @@ beautifulsoup4==4.13.5
 pypdf==6.0.0
 Pillow==11.3.0
 pytesseract==0.3.13
+websockets==15.0.1

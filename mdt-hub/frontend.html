@@ -157,6 +157,8 @@
         <div id="diagModels" class="muted" style="margin-top:4px;"></div>
         <div id="diagAgents" class="muted" style="margin-top:4px;"></div>
         <div id="diagPoll" class="muted" style="margin-top:4px;"></div>
+        <div id="diagWs" class="muted" style="margin-top:4px;"></div>
+        <div id="diagWsClose" class="muted" style="margin-top:4px;"></div>
         <div class="btn-row" style="margin-top:8px;">
           <button onclick="retryLoadModels()">重试加载模型</button>
           <button onclick="retryLoadAgents()">重试加载 Agent</button>
@@ -291,7 +293,7 @@
     const API_OVERRIDE = urlParams.get('api');
     const IS_LOCAL = ['127.0.0.1', 'localhost'].includes(BASE_HOST);
     const IS_FILE_SCHEME = PAGE_PROTO === 'file:';
-    const API = API_OVERRIDE || (IS_FILE_SCHEME ? 'http://127.0.0.1:8788' : (IS_LOCAL ? `http://${BASE_HOST}:8788` : `${PAGE_PROTO}//${location.host}`));
+    const API = API_OVERRIDE || (IS_FILE_SCHEME ? 'http://127.0.0.1:8788' : `${PAGE_PROTO}//${location.host}`);
     const IS_BACKEND_ORIGIN = !API_OVERRIDE;
     const WS_BASE = API_OVERRIDE ? API_OVERRIDE.replace(/^http/i, WS_PROTO) : API.replace(/^http/i, WS_PROTO);
     const WS_URL = `${WS_BASE.replace(/\/$/, '')}/ws/events`;
@@ -304,6 +306,8 @@
     const diagModels = document.getElementById('diagModels');
     const diagAgents = document.getElementById('diagAgents');
     const diagPoll = document.getElementById('diagPoll');
+    const diagWs = document.getElementById('diagWs');
+    const diagWsClose = document.getElementById('diagWsClose');
 
     const speakerCounter = {};
     const consensusSeries = [];
@@ -315,13 +319,23 @@
     let pingTimer = null;
     let pollTimer = null;
     let wsConnectTimeout = null;
+    let wsReconnectTimer = null;
+    let wsReconnectAttempt = 0;
+    let forcePolling = false;
     const seenEventIds = new Set();
+    const wsReconnectDelays = [1000, 2000, 5000, 5000, 5000];
     const pollBackoffDelays = [3000, 5000, 8000];
     let pollBackoffIndex = 0;
     const diagState = {
       models: { status: '-', durationMs: '-', at: '-' },
       agents: { status: '-', durationMs: '-', at: '-' },
       pollLastSuccess: '-',
+      wsReadyState: 'UNSET',
+      wsLastError: '-',
+      wsCloseCode: '-',
+      wsCloseReason: '-',
+      wsLastHandshakeAt: '-',
+      pollActive: false,
     };
 
     const AGENT_PERSONA = {
@@ -380,11 +394,23 @@
       return d.toLocaleTimeString();
     }
 
+    function wsReadyStateLabel(state) {
+      switch (state) {
+        case WebSocket.CONNECTING: return 'CONNECTING';
+        case WebSocket.OPEN: return 'OPEN';
+        case WebSocket.CLOSING: return 'CLOSING';
+        case WebSocket.CLOSED: return 'CLOSED';
+        default: return String(state);
+      }
+    }
+
     function updateDiagnostics() {
       diagApi.textContent = `API: ${API}`;
       diagModels.textContent = `models: ${diagState.models.status} | ${diagState.models.durationMs}ms | ${formatTime(diagState.models.at)}`;
       diagAgents.textContent = `agents: ${diagState.agents.status} | ${diagState.agents.durationMs}ms | ${formatTime(diagState.agents.at)}`;
-      diagPoll.textContent = `轮询最近成功: ${formatTime(diagState.pollLastSuccess)} | 当前间隔: ${pollBackoffDelays[pollBackoffIndex] / 1000}s`;
+      diagPoll.textContent = `轮询: ${diagState.pollActive ? '启用' : '关闭'} | 最近成功: ${formatTime(diagState.pollLastSuccess)} | 当前间隔: ${pollBackoffDelays[pollBackoffIndex] / 1000}s`;
+      diagWs.textContent = `WS readyState: ${diagState.wsReadyState} | last error: ${diagState.wsLastError} | 最近握手: ${formatTime(diagState.wsLastHandshakeAt)}`;
+      diagWsClose.textContent = `WS close: code=${diagState.wsCloseCode} reason=${diagState.wsCloseReason || '-'}`;
     }
 
     function toErrorMessage(err, context = '请求失败') {
@@ -587,6 +613,7 @@
     }
 
     function startPollingFallback() {
+      diagState.pollActive = true;
       scheduleNextPoll(0);
     }
 
@@ -594,6 +621,7 @@
       if (pollTimer) clearTimeout(pollTimer);
       pollTimer = null;
       pollBackoffIndex = 0;
+      diagState.pollActive = false;
       updateDiagnostics();
     }
 
@@ -617,52 +645,98 @@
       }
     }
 
+    function scheduleWSReconnect() {
+      if (forcePolling) return;
+      if (wsReconnectTimer) return;
+      const delay = wsReconnectDelays[Math.min(wsReconnectAttempt, wsReconnectDelays.length - 1)];
+      wsReconnectTimer = setTimeout(() => {
+        wsReconnectTimer = null;
+        connectWS();
+      }, delay);
+    }
+
     function connectWS() {
+      if (forcePolling) return;
+      if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
       wsState.textContent = 'WebSocket 连接中...';
       wsState.style.background = 'rgba(243,156,18,.2)';
+      diagState.wsReadyState = 'CONNECTING';
+      updateDiagnostics();
+
       ws = new WebSocket(WS_URL);
 
       if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
       wsConnectTimeout = setTimeout(() => {
         if (ws && ws.readyState === WebSocket.CONNECTING) {
-          wsState.textContent = 'WebSocket 连接超时（切轮询）';
+          diagState.wsLastError = '握手超时(3s)';
+          wsState.textContent = 'WebSocket 握手超时（降级轮询）';
           wsState.style.background = 'rgba(255,95,109,.2)';
           startPollingFallback();
-          try { ws.close(); } catch (_) {}
+          updateDiagnostics();
+          try { ws.close(4000, 'handshake timeout'); } catch (_) {}
         }
       }, 3000);
 
-      ws.onopen = async () => {
+      ws.onopen = () => {
         if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
-        wsState.textContent = 'WebSocket 已连接';
+        wsReconnectAttempt = 0;
+        diagState.wsReadyState = wsReadyStateLabel(ws.readyState);
+        diagState.wsLastError = '-';
+        diagState.wsCloseCode = '-';
+        diagState.wsCloseReason = '-';
+        diagState.wsLastHandshakeAt = Date.now();
+        wsState.textContent = 'WebSocket 已连接（实时）';
         wsState.style.background = 'rgba(46,204,113,.2)';
         stopPollingFallback();
         clearPing();
-        ws.send('ping');
+        try { ws.send(JSON.stringify({ type: 'ping', ts: Date.now() })); } catch (_) {}
         pingTimer = setInterval(() => {
-          try { ws.send('ping'); } catch (_) {}
-        }, 5000);
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          try { ws.send(JSON.stringify({ type: 'ping', ts: Date.now() })); } catch (_) {}
+        }, 15000);
+        updateDiagnostics();
       };
 
-      ws.onerror = () => {
+      ws.onerror = (evt) => {
         if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
-        wsState.textContent = 'WebSocket 异常（切轮询）';
+        diagState.wsReadyState = wsReadyStateLabel(ws?.readyState);
+        diagState.wsLastError = evt?.message || 'WebSocket onerror';
+        wsState.textContent = 'WebSocket 异常（降级轮询）';
         wsState.style.background = 'rgba(255,95,109,.2)';
         startPollingFallback();
+        updateDiagnostics();
       };
 
-      ws.onclose = () => {
+      ws.onclose = (evt) => {
         if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
-        wsState.textContent = 'WebSocket 断开（轮询模式）';
-        wsState.style.background = 'rgba(255,95,109,.2)';
         clearPing();
+        diagState.wsReadyState = 'CLOSED';
+        diagState.wsCloseCode = evt?.code ?? '-';
+        diagState.wsCloseReason = evt?.reason || '-';
+        const reasonText = `code=${diagState.wsCloseCode} reason=${diagState.wsCloseReason}`;
+        wsState.textContent = `WebSocket 断开（${reasonText}，降级轮询）`;
+        wsState.style.background = 'rgba(255,95,109,.2)';
         startPollingFallback();
-        setTimeout(connectWS, 3000);
+        wsReconnectAttempt += 1;
+        updateDiagnostics();
+        scheduleWSReconnect();
       };
 
       ws.onmessage = (msg) => {
-        const payload = JSON.parse(msg.data);
-        if (payload.type === 'mdt_event') addEvent(payload.data);
+        let payload = null;
+        try {
+          payload = JSON.parse(msg.data);
+        } catch (_) {
+          return;
+        }
+        if (payload.type === 'mdt_event') {
+          addEvent(payload.data);
+          return;
+        }
+        if (payload.type === 'pong') {
+          diagState.wsLastHandshakeAt = Date.now();
+          updateDiagnostics();
+        }
       };
     }
 
@@ -932,10 +1006,10 @@
       renderSectionPanel();
       updateDiagnostics();
 
-      // 启动时先开轮询兜底，再尝试建立 WebSocket；成功后会自动停止轮询
-      wsState.textContent = '初始化中（轮询兜底 + WebSocket 尝试连接）';
+      // 启动时优先 WebSocket，只有握手失败/中断才降级轮询
+      wsState.textContent = '初始化中（WebSocket 优先）';
       wsState.style.background = 'rgba(243,156,18,.2)';
-      startPollingFallback();
+      stopPollingFallback();
       connectWS();
       if (!IS_LOCAL && !API_OVERRIDE) {
         statusEl.textContent = '已使用同源 API/WS；如反代路径特殊可加 ?api=http://host:port 覆盖';
