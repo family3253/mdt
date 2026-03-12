@@ -72,8 +72,22 @@
     .view.active { display: block; }
 
     .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
     .chart { height: 300px; }
     .timeline { max-height: 320px; overflow: auto; }
+
+    .section-col { border: 1px solid #2a375f; border-radius: 10px; padding: 8px; background: #0f152a; }
+    .section-col h4 { margin: 0 0 8px; font-size: 14px; }
+    .section-list { display: flex; flex-direction: column; gap: 8px; }
+    .section-item { border: 1px solid #334270; border-radius: 10px; padding: 8px; background: rgba(16, 23, 44, .85); }
+    .section-item textarea { min-height: 62px; margin-top: 0; }
+    .item-row { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; margin-top: 6px; }
+    .check-inline { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+    .check-inline input { width: auto; margin: 0; }
+    .item-del { width: auto; padding: 6px 10px; margin-top: 0; font-size: 12px; }
+    .empty-tip { color: var(--muted); font-size: 12px; border: 1px dashed #334270; border-radius: 8px; padding: 8px; }
+    .err-tip { color: #ff9aa5; font-size: 12px; min-height: 16px; margin-top: 4px; }
+    .mini-btn { padding: 6px 10px; font-size: 12px; margin-top: 8px; }
     .ev { border-bottom: 1px dashed #324069; padding: 8px 0; }
     .ev:last-child { border-bottom: 0; }
 
@@ -124,6 +138,7 @@
       .app { grid-template-columns: 1fr; }
       .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
       .grid2 { grid-template-columns: 1fr; }
+      .grid3 { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -152,6 +167,35 @@
         <div class="btn-row">
           <button onclick="uploadCaseDocUrl()">导入网址病历</button>
           <button onclick="uploadCaseDocFile()">上传病历文件</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <b>病历解析结果面板（可编辑确认）</b>
+        <div class="muted" style="margin:6px 0 8px;">提交会诊前可确认/采纳影像、检验、用药条目</div>
+        <div class="grid3">
+          <div class="section-col">
+            <h4>影像</h4>
+            <div id="section-imaging" class="section-list"></div>
+            <div id="err-imaging" class="err-tip"></div>
+            <button class="mini-btn" onclick="addSectionItem('imaging')">+ 新增影像条目</button>
+          </div>
+          <div class="section-col">
+            <h4>检验</h4>
+            <div id="section-labs" class="section-list"></div>
+            <div id="err-labs" class="err-tip"></div>
+            <button class="mini-btn" onclick="addSectionItem('labs')">+ 新增检验条目</button>
+          </div>
+          <div class="section-col">
+            <h4>用药</h4>
+            <div id="section-medications" class="section-list"></div>
+            <div id="err-medications" class="err-tip"></div>
+            <button class="mini-btn" onclick="addSectionItem('medications')">+ 新增用药条目</button>
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:8px;">
+          <button onclick="loadLatestParsedSections()">加载最近解析结果</button>
+          <button onclick="resetSectionPanel()">清空面板</button>
         </div>
       </div>
 
@@ -230,6 +274,18 @@
     const consensusChart = echarts.init(document.getElementById('consensusChart'));
     const conflictChart = echarts.init(document.getElementById('conflictChart'));
 
+    const AGENT_PERSONA = {
+      'mdt-orchestrator': { emoji: '🎯', title: '会诊主持人', vibe: '冷静统筹型' },
+      'mdt-id': { emoji: '🦠', title: '感染科主任', vibe: '耐药策略型' },
+      'mdt-micro': { emoji: '🧫', title: '微生物专家', vibe: '证据谨慎型' },
+      'mdt-pharm': { emoji: '💊', title: '临床药师', vibe: '剂量精算型' },
+      'mdt-icu': { emoji: '🫀', title: 'ICU医生', vibe: '高危监护型' },
+      'mdt-evidence': { emoji: '📚', title: '循证秘书', vibe: '文献归纳型' },
+      'mdt-radiology': { emoji: '🩻', title: '影像科医生', vibe: '征象判读型' },
+      'mdt-lab': { emoji: '🧪', title: '检验科医生', vibe: '指标趋势型' },
+      'human_clinician': { emoji: '👨‍⚕️', title: '临床医生', vibe: '病例提出者' },
+    };
+
     const seats = [
       { id: 'mdt-orchestrator', x: 50, y: 12, label: '主持人' },
       { id: 'mdt-id', x: 18, y: 28, label: '感染科' },
@@ -241,6 +297,13 @@
     ];
     const seatState = new Map();
 
+    const SECTION_KEYS = ['imaging', 'labs', 'medications'];
+    const sectionPanelState = {
+      imaging: [],
+      labs: [],
+      medications: [],
+    };
+
     function renderRoom() {
       room.innerHTML = `<div class="meeting-table">MDT 会诊桌（实时交互）</div>`;
       seats.forEach(s => {
@@ -249,13 +312,113 @@
         div.className = `seat ${st.cls}`;
         div.style.left = s.x + '%';
         div.style.top = s.y + '%';
+        const p = AGENT_PERSONA[s.id] || { emoji: '🤖', title: s.label || s.id, vibe: '通用专家' };
         div.innerHTML = `
-          <div class="avatar">${(s.label || s.id).slice(0,4)}</div>
-          <div class="name">${s.id}</div>
+          <div class="avatar" title="${p.vibe}">${p.emoji}</div>
+          <div class="name">${p.title}</div>
+          <div class="muted" style="font-size:11px">${s.id}</div>
           <div class="bubble">${st.text}</div>
         `;
         room.appendChild(div);
       });
+    }
+
+    function normalizeSectionItems(items) {
+      return (items || [])
+        .map(it => {
+          if (typeof it === 'string') return { text: it, confirmed: true };
+          return { text: String(it?.text || ''), confirmed: Boolean(it?.confirmed) };
+        })
+        .filter(it => it.text.trim().length > 0);
+    }
+
+    function renderSectionColumn(key) {
+      const box = document.getElementById(`section-${key}`);
+      const err = document.getElementById(`err-${key}`);
+      if (!box || !err) return;
+      err.textContent = '';
+      const list = sectionPanelState[key] || [];
+      if (!list.length) {
+        box.innerHTML = `<div class="empty-tip">暂无条目，可手动新增或先导入病历。</div>`;
+        return;
+      }
+      box.innerHTML = '';
+      list.forEach((item, idx) => {
+        const node = document.createElement('div');
+        node.className = 'section-item';
+        node.innerHTML = `
+          <textarea placeholder="请输入条目内容">${item.text || ''}</textarea>
+          <div class="item-row">
+            <label class="check-inline">
+              <input type="checkbox" ${item.confirmed ? 'checked' : ''} />
+              确认/采纳
+            </label>
+            <button class="item-del" onclick="removeSectionItem('${key}', ${idx})">删除</button>
+          </div>
+        `;
+        const ta = node.querySelector('textarea');
+        const ck = node.querySelector('input[type="checkbox"]');
+        ta.addEventListener('input', () => {
+          sectionPanelState[key][idx].text = ta.value;
+          if (!ta.value.trim()) err.textContent = '存在空条目，提交时会自动忽略。';
+        });
+        ck.addEventListener('change', () => {
+          sectionPanelState[key][idx].confirmed = ck.checked;
+        });
+        box.appendChild(node);
+      });
+    }
+
+    function renderSectionPanel() {
+      SECTION_KEYS.forEach(renderSectionColumn);
+    }
+
+    function applySections(sections = {}) {
+      SECTION_KEYS.forEach(key => {
+        sectionPanelState[key] = normalizeSectionItems(sections[key] || []).map(it => ({ ...it }));
+      });
+      renderSectionPanel();
+    }
+
+    function addSectionItem(key) {
+      sectionPanelState[key].push({ text: '', confirmed: true });
+      renderSectionColumn(key);
+    }
+
+    function removeSectionItem(key, idx) {
+      sectionPanelState[key].splice(idx, 1);
+      renderSectionColumn(key);
+    }
+
+    function resetSectionPanel() {
+      SECTION_KEYS.forEach(key => { sectionPanelState[key] = []; });
+      renderSectionPanel();
+      statusEl.textContent = '病历解析结果面板已清空';
+    }
+
+    function getConfirmedSectionsPayload() {
+      const payload = {};
+      SECTION_KEYS.forEach(key => {
+        payload[key] = (sectionPanelState[key] || [])
+          .map(it => ({ text: String(it.text || '').trim(), confirmed: Boolean(it.confirmed) }))
+          .filter(it => it.text.length > 0);
+      });
+      return payload;
+    }
+
+    async function loadLatestParsedSections() {
+      const caseId = document.getElementById('caseId').value.trim();
+      const resp = await fetch(`${API}/cases/${caseId}/documents`);
+      if (!resp.ok) { statusEl.textContent = `加载失败: ${await resp.text()}`; return; }
+      const data = await resp.json();
+      const latest = (data.documents || [])[0];
+      if (!latest) {
+        resetSectionPanel();
+        statusEl.textContent = '当前病例暂无解析病历';
+        return;
+      }
+      applySections(latest.sections || {});
+      statusEl.textContent = `已加载最近病历解析结果（文档ID ${latest.id}）`;
     }
 
     function updateSeat(ev) {
@@ -311,6 +474,7 @@
       setInterval(() => ws.send('ping'), 5000);
       loadAgents();
       renderRoom();
+      renderSectionPanel();
     };
     ws.onclose = () => {
       wsState.textContent = 'WebSocket 断开';
@@ -324,16 +488,26 @@
     async function submitDiscussion() {
       const caseId = document.getElementById('caseId').value.trim();
       const message = document.getElementById('msg').value.trim();
+      if (!message) { statusEl.textContent = '请先输入会诊问题'; return; }
+      const confirmedSections = getConfirmedSectionsPayload();
       await fetch(`${API}/cases/open`, {
         method: 'POST', headers: {'content-type': 'application/json'},
         body: JSON.stringify({case_id: caseId, patient_summary: {note: 'interactive case'}})
       });
       const resp = await fetch(`${API}/discussion/submit`, {
         method: 'POST', headers: {'content-type': 'application/json'},
-        body: JSON.stringify({case_id: caseId, round_no: 1, speaker: 'human_clinician', message})
+        body: JSON.stringify({
+          case_id: caseId,
+          round_no: 1,
+          speaker: 'human_clinician',
+          message,
+          confirmed_sections: confirmedSections,
+        })
       });
       const data = await resp.json();
-      statusEl.textContent = `已提交讨论，生成 ${data.generated_count} 条响应`;
+      if (!resp.ok) { statusEl.textContent = `提交失败: ${JSON.stringify(data)}`; return; }
+      const picked = Object.values(confirmedSections).reduce((n, arr) => n + (arr || []).filter(x => x.confirmed).length, 0);
+      statusEl.textContent = `已提交讨论，生成 ${data.generated_count} 条响应（已带入确认条目 ${picked} 条）`;
     }
 
     async function runReviewRound() {
@@ -406,7 +580,8 @@
       });
       const data = await resp.json();
       if (!resp.ok) { statusEl.textContent = `病历网址导入失败: ${JSON.stringify(data)}`; return; }
-      statusEl.textContent = `病历导入完成，提取影像${(data.sections?.imaging||[]).length}条，检验${(data.sections?.labs||[]).length}条`;
+      applySections(data.sections || {});
+      statusEl.textContent = `病历导入完成，提取影像${(data.sections?.imaging||[]).length}条，检验${(data.sections?.labs||[]).length}条，用药${(data.sections?.medications||[]).length}条`;
     }
 
     async function uploadCaseDocFile() {
@@ -418,7 +593,8 @@
       const resp = await fetch(`${API}/cases/${caseId}/documents/upload`, { method:'POST', body: fd });
       const data = await resp.json();
       if (!resp.ok) { statusEl.textContent = `病历文件导入失败: ${JSON.stringify(data)}`; return; }
-      statusEl.textContent = `病历上传完成，提取影像${(data.sections?.imaging||[]).length}条，检验${(data.sections?.labs||[]).length}条`;
+      applySections(data.sections || {});
+      statusEl.textContent = `病历上传完成，提取影像${(data.sections?.imaging||[]).length}条，检验${(data.sections?.labs||[]).length}条，用药${(data.sections?.medications||[]).length}条`;
     }
 
     async function loadAgents() {
@@ -462,6 +638,7 @@
     });
 
     renderRoom();
+    renderSectionPanel();
   </script>
 </body>
 </html>

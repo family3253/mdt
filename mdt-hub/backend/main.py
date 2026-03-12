@@ -50,11 +50,23 @@ class CaseOpen(BaseModel):
     danger_flag: bool = False
 
 
+class ConfirmedSectionItem(BaseModel):
+    text: str
+    confirmed: bool = True
+
+
+class ConfirmedSections(BaseModel):
+    imaging: list[ConfirmedSectionItem] = Field(default_factory=list)
+    labs: list[ConfirmedSectionItem] = Field(default_factory=list)
+    medications: list[ConfirmedSectionItem] = Field(default_factory=list)
+
+
 class DiscussionInput(BaseModel):
     case_id: str
     round_no: int = Field(default=1, ge=1)
     speaker: str = "human_clinician"
     message: str
+    confirmed_sections: Optional[ConfirmedSections] = None
 
 
 class RoundReviewInput(BaseModel):
@@ -497,13 +509,25 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
     """模拟现实 MDT：先录入临床医生发言，再按角色生成一轮专家回应。"""
     round_no = payload.round_no or max(1, _latest_round(payload.case_id))
 
+    confirmed_sections = payload.confirmed_sections.model_dump(mode="json") if payload.confirmed_sections else None
+    adopted_lines: list[str] = []
+    if payload.confirmed_sections:
+        for k in ("imaging", "labs", "medications"):
+            for item in getattr(payload.confirmed_sections, k):
+                if item.confirmed and item.text.strip():
+                    adopted_lines.append(f"[{k}] {item.text.strip()}")
+
+    human_payload: dict[str, Any] = {"text": payload.message}
+    if confirmed_sections:
+        human_payload["confirmed_sections"] = confirmed_sections
+
     human_event = MDTEvent(
         case_id=payload.case_id,
         round_no=round_no,
         event_type="discussion_message",
         speaker=payload.speaker,
         specialty="human",
-        payload={"text": payload.message},
+        payload=human_payload,
         confidence=None,
     )
     human_body = _persist_event(human_event)
@@ -512,6 +536,10 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
     generated: list[dict[str, Any]] = []
     for agent_id, specialty, lens in _load_enabled_agents():
         learned = _knowledge_snippet(agent_id)
+        discussion_text = f"针对输入“{payload.message}”，从{lens}角度建议补充评估并形成可执行方案。"
+        if adopted_lines:
+            discussion_text += " 已采纳病历要点：" + "；".join(adopted_lines[:3])
+
         ev = MDTEvent(
             case_id=payload.case_id,
             round_no=round_no,
@@ -519,9 +547,10 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
             speaker=agent_id,
             specialty=specialty,
             payload={
-                "discussion": f"针对输入“{payload.message}”，从{lens}角度建议补充评估并形成可执行方案。",
+                "discussion": discussion_text,
                 "learned_context": learned,
                 "source": "simulated_role_response",
+                "confirmed_sections": confirmed_sections,
             },
             confidence=0.75,
         )
@@ -550,6 +579,8 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
         "case_id": payload.case_id,
         "round_no": round_no,
         "generated_count": len(generated) + 1,
+        "confirmed_sections_received": bool(confirmed_sections),
+        "confirmed_adopted_count": len(adopted_lines),
     }
 
 
