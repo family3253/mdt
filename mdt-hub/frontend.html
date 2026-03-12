@@ -276,7 +276,7 @@
     const API = `http://${BASE_HOST}:8788`;
     const WS_PROTO = location.protocol === 'https:' ? 'wss' : 'ws';
     const WS_URL = `${WS_PROTO}://${BASE_HOST}:8788/ws/events`;
-    const ws = new WebSocket(WS_URL);
+    let ws = null;
     const wsState = document.getElementById('wsState');
     const statusEl = document.getElementById('status');
     const timeline = document.getElementById('timeline');
@@ -522,6 +522,8 @@
     }
 
     function connectWS() {
+      wsState.textContent = 'WebSocket 连接中...';
+      wsState.style.background = 'rgba(243,156,18,.2)';
       ws = new WebSocket(WS_URL);
 
       ws.onopen = async () => {
@@ -533,6 +535,12 @@
         pingTimer = setInterval(() => {
           try { ws.send('ping'); } catch (_) {}
         }, 5000);
+      };
+
+      ws.onerror = () => {
+        wsState.textContent = 'WebSocket 异常（切轮询）';
+        wsState.style.background = 'rgba(255,95,109,.2)';
+        startPollingFallback();
       };
 
       ws.onclose = () => {
@@ -583,6 +591,7 @@
         body: JSON.stringify({case_id: caseId, from_round: 1, to_round: 2})
       });
       const data = await resp.json();
+      if (!resp.ok) { statusEl.textContent = `二轮互评失败: ${JSON.stringify(data)}`; return; }
       statusEl.textContent = `二轮互评完成，新增 ${data.generated_count} 条事件`;
       await loadConflictGraph();
     }
@@ -721,6 +730,10 @@
     async function loadAgents() {
       const resp = await fetch(`${API}/agents`);
       const data = await resp.json();
+      if (!resp.ok) {
+        statusEl.textContent = `加载 Agent 列表失败: ${JSON.stringify(data)}`;
+        return;
+      }
       document.getElementById('agentsList').textContent = `当前 Agent(${data.count}): ` + data.agents.map(a => `${a.agent_id}[${a.specialty}]`).join(' | ');
 
       const modelBox = document.getElementById('agentModelList');
@@ -748,6 +761,7 @@
       const caseId = document.getElementById('caseId').value.trim();
       const resp = await fetch(`${API}/cases/${caseId}/conflicts`);
       const data = await resp.json();
+      if (!resp.ok) { statusEl.textContent = `加载冲突图失败: ${JSON.stringify(data)}`; return; }
       const nodes = (data.nodes || []).map((n, i) => ({ id: n.id, name: n.id, value: i, symbolSize: 44 }));
       const links = (data.edges || []).map(e => ({
         source: e.from,
