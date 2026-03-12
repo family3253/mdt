@@ -346,6 +346,7 @@
         <div class="grid2">
           <div class="panel">
             <h3 style="margin-top:0" data-i18n="timelineTitle">实时时间线</h3>
+            <div class="muted" style="margin-bottom:8px;"><b data-i18n="roundStateTitle">迭代状态</b>：<span id="roundState">-</span></div>
             <div id="timeline" class="timeline"></div>
           </div>
           <div class="panel">
@@ -401,7 +402,7 @@
         defaultModelOpt: '默认模型（{model}）',
         modelsFallback: '模型列表使用降级配置：{note}',
         agentsListFmt: '当前 Agent({count}): {agents}', saveModel: '保存模型',
-        conflictFail: '加载冲突图失败',
+        conflictFail: '加载冲突图失败', roundStateTitle: '迭代状态', roundStateFmt: '当前轮次: {round} | 冲突数: {conflicts} | 已统一: {unified}', yes: '是', no: '否',
         modelsLoadOk: '模型列表加载成功', modelsLoadFail: '加载模型列表失败', agentsLoadOk: 'Agent 列表加载成功', agentsLoadFail: '加载 Agent 列表失败',
         wsInit: '初始化中（WebSocket 优先）', wsInitHint: '已使用同源 API/WS；如反代路径特殊可加 ?api=http://host:port 覆盖', initDonePartial: '初始化完成（模型列表加载失败，可手动重试）',
         wsConnectingState: 'WebSocket 连接中...', wsOpen: 'WebSocket 已连接（实时）', wsHandshakeTimeout: 'WebSocket 握手超时（降级轮询）', wsError: 'WebSocket 异常（降级轮询）', wsClosedFmt: 'WebSocket 断开（{reason}，降级轮询）', speakerEmpty: '暂无当前病例专家发言 / No speaker data for current case', consensusEmpty: '暂无共识曲线数据 / No consensus points for current case', conflictEmpty: '暂无冲突关系数据 / No conflict edges for current case',
@@ -438,7 +439,7 @@
         defaultModelOpt: 'Default model ({model})',
         modelsFallback: 'Model list uses fallback config: {note}',
         agentsListFmt: 'Current Agents ({count}): {agents}', saveModel: 'Save',
-        conflictFail: 'Load conflict graph failed',
+        conflictFail: 'Load conflict graph failed', roundStateTitle: 'Iteration State', roundStateFmt: 'Current round: {round} | Open conflicts: {conflicts} | Unified: {unified}', yes: 'Yes', no: 'No',
         modelsLoadOk: 'Model list loaded', modelsLoadFail: 'Model list load failed', agentsLoadOk: 'Agent list loaded', agentsLoadFail: 'Agent list load failed',
         wsInit: 'Initializing (WebSocket preferred)', wsInitHint: 'Using same-origin API/WS; append ?api=http://host:port if reverse-proxy path differs', initDonePartial: 'Initialization done (model list failed, retry manually)',
         wsConnectingState: 'WebSocket connecting...', wsOpen: 'WebSocket connected (realtime)', wsHandshakeTimeout: 'WebSocket handshake timeout (fallback to polling)', wsError: 'WebSocket error (fallback to polling)', wsClosedFmt: 'WebSocket closed ({reason}, fallback to polling)', speakerEmpty: 'No speaker data for current case / 暂无当前病例专家发言', consensusEmpty: 'No consensus points for current case / 暂无共识曲线数据', conflictEmpty: 'No conflict edges for current case / 暂无冲突关系数据',
@@ -473,6 +474,7 @@
       updateDiagnostics();
       renderSectionPanel();
       renderRoom();
+      roundStateEl.textContent = tr('roundStateFmt', { round: '-', conflicts: '-', unified: '-' });
       renderCharts();
     }
 
@@ -507,6 +509,7 @@
     const wsState = document.getElementById('wsState');
     const statusEl = document.getElementById('status');
     const timeline = document.getElementById('timeline');
+    const roundStateEl = document.getElementById('roundState');
     const room = document.getElementById('room');
     const diagApi = document.getElementById('diagApi');
     const diagModels = document.getElementById('diagModels');
@@ -795,6 +798,21 @@
       return String(payload.discussion || payload.review || payload.summary || payload.text || eventType || '').slice(0, 220);
     }
 
+
+    function updateRoundState() {
+      const consensusEvents = currentCaseEvents.filter(e => e.event_type === 'consensus_updated' || e.event_type === 'final_consensus');
+      if (!consensusEvents.length) {
+        roundStateEl.textContent = tr('roundStateFmt', { round: '-', conflicts: '-', unified: '-' });
+        return;
+      }
+      const latest = consensusEvents.sort((a,b)=>(a.event_id||0)-(b.event_id||0)).slice(-1)[0];
+      const p = latest.payload || {};
+      const roundNo = latest.round_no ?? '-';
+      const conflicts = p.open_conflicts ?? p.disagree_count ?? '-';
+      const unified = (p.is_unified === true || latest.event_type === 'final_consensus') ? tr('yes') : tr('no');
+      roundStateEl.textContent = tr('roundStateFmt', { round: roundNo, conflicts, unified });
+    }
+
     function renderTimeline() {
       timeline.innerHTML = '';
       const sorted = [...currentCaseEvents].sort((a, b) => (a.event_id || 0) - (b.event_id || 0));
@@ -804,6 +822,7 @@
         div.innerHTML = `<b>${ev.event_type}</b> · ${ev.speaker}<div class='muted'>${ev.timestamp} | round=${ev.round_no} | conf=${ev.confidence ?? '-'}</div><div class='muted'>${summarizeEventPayload(ev.payload || {}, ev.event_type)}</div>`;
         timeline.prepend(div);
       });
+      updateRoundState();
     }
 
     function clearCaseScopedState() {
@@ -812,6 +831,7 @@
       seenEventIds.clear();
       seatState.clear();
       renderRoom();
+      roundStateEl.textContent = tr('roundStateFmt', { round: '-', conflicts: '-', unified: '-' });
       renderCharts();
     }
 
