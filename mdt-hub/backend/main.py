@@ -76,6 +76,7 @@ class DiscussionInput(BaseModel):
     speaker: str = "human_clinician"
     message: str
     confirmed_sections: Optional[ConfirmedSections] = None
+    enable_docs_context: bool = True
 
 
 class RoundReviewInput(BaseModel):
@@ -404,6 +405,62 @@ def _store_case_doc(case_id: str, source: str, content: str, doc_type: str = "re
     return {"doc_id": doc_id, "case_id": case_id, "sections": sections}
 
 
+def _is_image_source(source: str) -> bool:
+    src = (source or "").lower()
+    return any(src.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"))
+
+
+def _build_case_docs_context(case_id: str, limit: int = 3) -> dict[str, Any]:
+    with conn() as c:
+        rows = c.execute(
+            "select id, doc_type, source, content, sections, created_at from mdt_case_docs where case_id=? order by id desc limit ?",
+            (case_id, limit),
+        ).fetchall()
+
+    docs: list[dict[str, Any]] = []
+    merged_sections = {"imaging": [], "labs": [], "medications": []}
+    has_image_doc = False
+    for r in rows:
+        sections = json.loads(r["sections"] or "{}")
+        for k in ("imaging", "labs", "medications"):
+            merged_sections[k].extend(sections.get(k) or [])
+        is_img = _is_image_source(r["source"])
+        has_image_doc = has_image_doc or is_img
+        docs.append(
+            {
+                "doc_id": r["id"],
+                "doc_type": r["doc_type"],
+                "source": r["source"],
+                "created_at": r["created_at"],
+                "is_image_source": is_img,
+                "text_excerpt": (r["content"] or "")[:400],
+                "sections": sections,
+            }
+        )
+
+    # 简单去重截断，保证 payload 可读可追溯
+    for k in merged_sections:
+        seen = set()
+        uniq = []
+        for item in merged_sections[k]:
+            text = str(item).strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            uniq.append(text)
+            if len(uniq) >= 15:
+                break
+        merged_sections[k] = uniq
+
+    return {
+        "case_id": case_id,
+        "doc_count": len(docs),
+        "has_image_doc": has_image_doc,
+        "latest_docs": docs,
+        "merged_sections": merged_sections,
+    }
+
+
 def _candidate_openclaw_config_paths() -> list[Path]:
     home = Path.home()
     return [
@@ -628,6 +685,13 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
     round_no = payload.round_no or max(1, _latest_round(payload.case_id))
 
     confirmed_sections = payload.confirmed_sections.model_dump(mode="json") if payload.confirmed_sections else None
+    docs_context = _build_case_docs_context(payload.case_id) if payload.enable_docs_context else {
+        "case_id": payload.case_id,
+        "doc_count": 0,
+        "has_image_doc": False,
+        "latest_docs": [],
+        "merged_sections": {"imaging": [], "labs": [], "medications": []},
+    }
     adopted_lines: list[str] = []
     if payload.confirmed_sections:
         for k in ("imaging", "labs", "medications"):
@@ -635,7 +699,7 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
                 if item.confirmed and item.text.strip():
                     adopted_lines.append(f"[{k}] {item.text.strip()}")
 
-    human_payload: dict[str, Any] = {"text": payload.message}
+    human_payload: dict[str, Any] = {"text": payload.message, "docs_context": docs_context}
     if confirmed_sections:
         human_payload["confirmed_sections"] = confirmed_sections
 
@@ -658,6 +722,8 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
         discussion_text = f"针对输入“{payload.message}”，从{lens}角度建议补充评估并形成可执行方案。"
         if adopted_lines:
             discussion_text += " 已采纳病历要点：" + "；".join(adopted_lines[:3])
+        if docs_context.get("doc_count"):
+            discussion_text += f" 参考了{docs_context.get('doc_count')}份病历文档。"
 
         ev = MDTEvent(
             case_id=payload.case_id,
@@ -671,6 +737,12 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
                 "source": "simulated_role_response",
                 "model_used": model_used,
                 "confirmed_sections": confirmed_sections,
+                "docs_context": docs_context,
+                "case_context": {
+                    "message": payload.message,
+                    "adopted_confirmed_lines": adopted_lines[:10],
+                    "doc_refs": [d.get("doc_id") for d in docs_context.get("latest_docs", [])],
+                },
             },
             confidence=0.75,
         )
@@ -701,6 +773,9 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
         "generated_count": len(generated) + 1,
         "confirmed_sections_received": bool(confirmed_sections),
         "confirmed_adopted_count": len(adopted_lines),
+        "docs_context_enabled": payload.enable_docs_context,
+        "docs_context_doc_count": docs_context.get("doc_count", 0),
+        "docs_context_has_image_doc": docs_context.get("has_image_doc", False),
     }
 
 
@@ -725,6 +800,7 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
     ]
 
     generated = 0
+    docs_context = _build_case_docs_context(payload.case_id)
     agents = _load_enabled_agents()
     for idx, (agent_id, specialty, lens, agent_model) in enumerate(agents):
         target = opinions[(idx + 1) % len(opinions)]
@@ -741,6 +817,11 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
                 "target_speaker": target["speaker"],
                 "model_used": agent_model or DEFAULT_AGENT_MODEL,
                 "review": f"{agent_id} 对 {target['speaker']} 的观点给出{('反驳' if stance=='oppose' else '支持')}：从{lens}角度补充证据与边界。",
+                "docs_context": docs_context,
+                "case_context": {
+                    "source_round": payload.from_round,
+                    "doc_refs": [d.get("doc_id") for d in docs_context.get("latest_docs", [])],
+                },
             },
             confidence=0.74,
             reply_to_event_id=target["event_id"],

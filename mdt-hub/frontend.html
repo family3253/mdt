@@ -155,6 +155,10 @@
         <b>会诊输入</b>
         <input id="caseId" value="CASE-LIVE-001" placeholder="Case ID" />
         <textarea id="msg" placeholder="输入临床问题...">患者发热低血压，近期广谱抗菌药暴露，伴 AKI 风险</textarea>
+        <label class="check-inline" style="margin-top:8px; display:flex;">
+          <input id="enableDocsContext" type="checkbox" checked />
+          启用病历直读上下文
+        </label>
         <div class="btn-row">
           <button onclick="submitDiscussion()">提交讨论</button>
           <button onclick="runReviewRound()">二轮互评</button>
@@ -562,12 +566,14 @@
           speaker: 'human_clinician',
           message,
           confirmed_sections: confirmedSections,
+          enable_docs_context: document.getElementById('enableDocsContext').checked,
         })
       });
       const data = await resp.json();
       if (!resp.ok) { statusEl.textContent = `提交失败: ${JSON.stringify(data)}`; return; }
       const picked = Object.values(confirmedSections).reduce((n, arr) => n + (arr || []).filter(x => x.confirmed).length, 0);
-      statusEl.textContent = `已提交讨论，生成 ${data.generated_count} 条响应（已带入确认条目 ${picked} 条）`;
+      const docsInfo = `病历上下文:${data.docs_context_enabled ? '开' : '关'} 文档${data.docs_context_doc_count ?? 0}份`;
+      statusEl.textContent = `已提交讨论，生成 ${data.generated_count} 条响应（已带入确认条目 ${picked} 条，${docsInfo}）`;
     }
 
     async function runReviewRound() {
