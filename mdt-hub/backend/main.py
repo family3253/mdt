@@ -703,12 +703,37 @@ def create_agent(payload: AgentCreate) -> dict[str, Any]:
 
 @app.post("/agents/{agent_id}/model")
 def update_agent_model(agent_id: str, payload: AgentModelUpdate) -> dict[str, Any]:
-    model = (payload.model or "").strip() or None
+    updates: list[str] = []
+    values: list[Any] = []
+
+    if payload.model is not None:
+        model = payload.model.strip() or None
+        updates.append("model=?")
+        values.append(model)
+    else:
+        model = None
+
+    if payload.enabled is not None:
+        updates.append("enabled=?")
+        values.append(1 if payload.enabled else 0)
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="no fields to update")
+
     with conn() as c:
-        cur = c.execute("update mdt_agents set model=? where agent_id=?", (model, agent_id))
+        values.append(agent_id)
+        cur = c.execute(f"update mdt_agents set {', '.join(updates)} where agent_id=?", tuple(values))
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="agent not found")
-    return {"ok": True, "agent_id": agent_id, "model": model}
+
+        row = c.execute("select model, enabled from mdt_agents where agent_id=?", (agent_id,)).fetchone()
+
+    return {
+        "ok": True,
+        "agent_id": agent_id,
+        "model": row["model"] if row else model,
+        "enabled": bool(row["enabled"]) if row else payload.enabled,
+    }
 
 
 @app.post("/agents/{agent_id}/knowledge")

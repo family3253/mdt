@@ -1,7 +1,7 @@
 # MDT Hub 前后端交互契约清单
 
 > 范围：`frontend.html` ↔ `backend/main.py`
-> 
+>
 > 目标：前端每个可见交互均有后端能力支撑，且请求/响应字段、失败提示可对齐。
 
 ## 1) 交互点总览
@@ -22,7 +22,7 @@
 | 二轮互评（按钮） | `POST /discussion/review` | `case_id`,`from_round`,`to_round` | `generated_count` | `二轮互评失败: ...` |
 | 刷新冲突图（按钮） | `GET /cases/{case_id}/conflicts` | - | `nodes[]`,`edges[]` | `加载冲突图失败: ...` |
 | WebSocket 实时事件 | `WS /ws/events` | 客户端 ping 文本 | `{"type":"mdt_event","data":...}` | 断连后 UI 显示“WebSocket 断开（轮询模式）” |
-| WebSocket 断连兜底轮询 | `GET /cases/{case_id}/events` | - | `events[]` | 轮询失败静默重试 |
+| WebSocket/默认轮询拉事件 | `GET /cases/{case_id}/events` | - | `events[]` | 统一错误提示（含 HTTP/异常信息） |
 
 ## 2) 字段对齐说明（已核验）
 
@@ -39,46 +39,35 @@
    - 前端事件渲染依赖：`event_id`,`event_type`,`speaker`,`payload`,`timestamp`,`round_no`,`confidence`。
    - 后端 `/cases/{case_id}/events` 与 WS 广播数据结构一致，可互相替代。
 
-## 3) 本次修复（最小改动）
+## 3) 新增稳定性/可观测约定
 
-### 修复点 A：`/cases/open` 改为幂等（后端）
-- 问题：前端每次提交讨论都会先调用 `POST /cases/open`；历史实现当病例已存在时返回 409，不利于前端流程一致性。
-- 修复：`open_case()` 改为幂等：
-  - 已存在：`200` + `{"ok":true,"already_exists":true,...}`
-  - 新建成功：`200` + `{"ok":true,"already_exists":false,...}`
-- 兼容性：不影响既有前端调用，且减少无意义错误分支。
+### 3.1 轮询退避
+- 前端默认启用轮询。
+- 失败退避：`3s -> 5s -> 8s`。
+- 任意一次成功后恢复到 `3s`。
 
-### 修复点 B：前端补齐关键失败分支（可读错误）
-- `runReviewRound()` 新增 `!resp.ok` 分支，避免失败时误报成功。
-- `loadAgents()` 新增 `!resp.ok` 分支，失败时提示 `加载 Agent 列表失败`。
-- `loadConflictGraph()` 新增 `!resp.ok` 分支，失败时提示 `加载冲突图失败`。
+### 3.2 连接诊断区字段
+- `API`：当前 API 基址。
+- `models`：最近一次 `GET /models/available` 的状态/耗时/时间。
+- `agents`：最近一次 `GET /agents` 的状态/耗时/时间。
+- `轮询最近成功`：最近一次 `/cases/{id}/events` 轮询成功时间。
+- `当前间隔`：当前轮询间隔。
 
-## 4) 关键流程本地验证记录
+### 3.3 统一请求与错误格式
+- 前端所有请求统一经 `requestWithMeta()`，统一构建错误消息。
+- 后端错误响应统一结构至少包含：
+  - `detail`
+  - `message`
+
+## 4) 本轮回归建议
 
 > 服务：`uvicorn backend.main:app --host 127.0.0.1 --port 8788`
 
-1. `/models/available`
-   - 命令：`curl -sS http://127.0.0.1:8788/models/available`
-   - 结果：返回 `models[]` 与 `default_model`，`fallback=false`。
-
-2. `/agents` 列表 + 更新模型
-   - 命令：
-     - `curl -sS http://127.0.0.1:8788/agents`
-     - `curl -sS -X POST http://127.0.0.1:8788/agents/mdt-id/model -H 'content-type: application/json' -d '{"model":"openai-codex/gpt-5.3-codex"}'`
-   - 结果：返回 `{"ok":true,...}`，再次查询 `mdt-id.model` 已更新。
-
-3. 病历上传/解析 sections
-   - 命令：`curl -sS -X POST http://127.0.0.1:8788/cases/CASE-LIVE-001/documents/upload -F 'file=@/tmp/mdt_case.txt;type=text/plain'`
-   - 结果：返回 `sections.imaging/labs/medications`，字段完整。
-
-4. `discussion/submit` 携带 `confirmed_sections`
-   - 命令：`curl -sS -X POST http://127.0.0.1:8788/discussion/submit ...`
-   - 结果：`accepted=true`，`confirmed_sections_received=true`，`confirmed_adopted_count=2`，`docs_context_doc_count=2`。
-
-5. WebSocket 断连兜底（轮询路径）可拉 events
-   - 命令：`curl -sS http://127.0.0.1:8788/cases/CASE-LIVE-001/events`
-   - 结果：返回 `events[]`（示例 `count=24`，末条 `event_type=conflict_detected`），可作为前端断连轮询数据源。
+1. `GET /healthz`：确认 `service/db/time/version`。
+2. `GET /models/available`：确认 models 与 default_model 返回。
+3. `GET /agents`：确认 Agent 列表可返回。
+4. `GET /cases/{case_id}/events`：确认轮询数据源可返回（空数组也视为正常）。
 
 ## 5) 结论
 
-前端当前所有可见交互点均已在后端具备对应能力；关键字段对齐，失败分支补齐后可读性达标。WebSocket 重连与轮询兜底链路可用。
+前端当前所有可见交互点均已在后端具备对应能力；在 WebSocket 不稳定场景下，轮询可稳定工作，且具备诊断与退避能力，便于回归验证。

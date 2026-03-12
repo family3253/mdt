@@ -285,14 +285,16 @@
 
   <script>
     const BASE_HOST = location.hostname || '127.0.0.1';
-    const WS_PROTO = location.protocol === 'https:' ? 'wss' : 'ws';
+    const PAGE_PROTO = location.protocol;
+    const WS_PROTO = PAGE_PROTO === 'https:' ? 'wss' : 'ws';
     const urlParams = new URLSearchParams(location.search);
     const API_OVERRIDE = urlParams.get('api');
     const IS_LOCAL = ['127.0.0.1', 'localhost'].includes(BASE_HOST);
-    const API = API_OVERRIDE || (IS_LOCAL ? `http://${BASE_HOST}:8788` : `${location.protocol}//${location.host}`);
-    const WS_URL = API_OVERRIDE
-      ? `${API_OVERRIDE.replace(/^http/i, WS_PROTO)}/ws/events`
-      : (IS_LOCAL ? `${WS_PROTO}://${BASE_HOST}:8788/ws/events` : `${WS_PROTO}://${location.host}/ws/events`);
+    const IS_FILE_SCHEME = PAGE_PROTO === 'file:';
+    const API = API_OVERRIDE || (IS_FILE_SCHEME ? 'http://127.0.0.1:8788' : (IS_LOCAL ? `http://${BASE_HOST}:8788` : `${PAGE_PROTO}//${location.host}`));
+    const IS_BACKEND_ORIGIN = !API_OVERRIDE;
+    const WS_BASE = API_OVERRIDE ? API_OVERRIDE.replace(/^http/i, WS_PROTO) : API.replace(/^http/i, WS_PROTO);
+    const WS_URL = `${WS_BASE.replace(/\/$/, '')}/ws/events`;
     let ws = null;
     const wsState = document.getElementById('wsState');
     const statusEl = document.getElementById('status');
