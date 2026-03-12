@@ -373,65 +373,22 @@ def get_candidates_count(
     return len(files), len(candidates)
 
 
-def report_protected_status(
-    *,
-    base_url: str,
-    token: str,
-    timeout: int,
-    user_agent: str,
-    protected_names: List[str],
-    logger: logging.Logger,
-) -> None:
+def report_protected_status(base_url: str, token: str, timeout: int, protected_names: List[str], logger: logging.Logger) -> None:
     names = [str(x).strip() for x in (protected_names or []) if str(x).strip()]
     if not names:
         return
     try:
         files = fetch_auth_files(base_url, token, timeout)
     except Exception as e:
-        logger.warning("保护账号状态输出失败: 拉取 auth-files 异常=%s", e)
+        logger.warning("保护账号状态输出失败: %s", e)
         return
-
-    by_name = {}
-    for it in files:
-        n = str(it.get("name") or it.get("id") or "").strip()
-        if n:
-            by_name[n] = it
-
+    file_names = {str(x.get('name') or x.get('id') or '').strip() for x in files}
     logger.info("保护账号状态开始（%s个）", len(names))
     for n in names:
-        item = by_name.get(n)
-        if not item:
+        if n in file_names:
+            logger.info("保护账号: %s | 状态=存在", n)
+        else:
             logger.warning("保护账号: %s | 状态=不存在", n)
-            continue
-        t = get_item_type(item)
-        idx = str(item.get("auth_index") or "")
-        if not idx:
-            logger.info("保护账号: %s | 类型=%s | 状态=存在(无auth_index)", n, t)
-            continue
-
-        probe_sc = None
-        try:
-            payload = build_probe_payload(
-                idx, user_agent, extract_chatgpt_account_id(item)
-            )
-            r = requests.post(
-                f"{base_url.rstrip('/')}/v0/management/api-call",
-                headers={**mgmt_headers(token), "Content-Type": "application/json"},
-                json=payload,
-                timeout=timeout,
-            )
-            if r.status_code == 200:
-                probe_sc = (r.json() or {}).get("status_code")
-        except Exception:
-            probe_sc = None
-
-        logger.info(
-            "保护账号: %s | 类型=%s | auth_index=%s | models探测=%s",
-            n,
-            t,
-            idx,
-            probe_sc,
-        )
     logger.info("保护账号状态结束")
 
 
@@ -2449,14 +2406,9 @@ def fetch_auth_files(base_url: str, token: str, timeout: int) -> List[Dict[str, 
 def build_probe_payload(
     auth_index: str, user_agent: str, chatgpt_account_id: Optional[str] = None
 ) -> Dict[str, Any]:
-    # NOTE:
-    # 历史上用 chatgpt.com/backend-api/wham/usage 做 401 清理探测。
-    # 该接口与 api.openai.com 的可用性并不等价，可能出现“探测通过但模型全挂”。
-    # 这里改为直接探测 OpenAI Models API，保证与实际推理链路一致。
     call_header = {
-        "Authorization": "Bearer " + "".join(["$", "TOKEN", "$"]),
+        "Authorization": "Bearer $TOKEN$",
         "Content-Type": "application/json",
-        "Accept": "application/json",
         "User-Agent": user_agent or DEFAULT_MGMT_UA,
     }
     if chatgpt_account_id:
@@ -2464,7 +2416,7 @@ def build_probe_payload(
     return {
         "authIndex": auth_index,
         "method": "GET",
-        "url": "https://api.openai.com/v1/models",
+        "url": "https://chatgpt.com/backend-api/wham/usage",
         "header": call_header,
     }
 
@@ -2490,8 +2442,6 @@ async def probe_account_async(
         "provider": item.get("provider"),
         "status_code": None,
         "invalid_401": False,
-        "healthy": False,
-        "invalid_reason": None,
         "error": None,
     }
     if not auth_index:
@@ -2519,55 +2469,11 @@ async def probe_account_async(
                     sc = data.get("status_code")
                     result["status_code"] = sc
                     result["invalid_401"] = sc == 401
-
-                    if sc == 200:
-                        result["healthy"] = True
-                        return result
-
-                    # 若 models 探测非 200，再补做一次 responses 探测；
-                    # 只要 API 可用就视为健康，避免误删“可跑 API”的账号。
-                    try:
-                        resp_payload = {
-                            "authIndex": str(auth_index),
-                            "method": "POST",
-                            "url": "https://api.openai.com/v1/responses",
-                            "header": {
-                                "Authorization": "Bearer " + "".join(["$", "TOKEN", "$"]),
-                                "Content-Type": "application/json",
-                                "Accept": "application/json",
-                                "User-Agent": user_agent or DEFAULT_MGMT_UA,
-                            },
-                            "data": json.dumps({"model": "gpt-5.4", "input": "ping", "max_output_tokens": 8}),
-                        }
-                        if chatgpt_account_id:
-                            resp_payload["header"]["Chatgpt-Account-Id"] = chatgpt_account_id
-                        async with semaphore:
-                            async with session.post(
-                                f"{base_url}/v0/management/api-call",
-                                headers={**mgmt_headers(token), "Content-Type": "application/json"},
-                                json=resp_payload,
-                                timeout=timeout,
-                            ) as resp2:
-                                t2 = await resp2.text()
-                                d2 = safe_json_text(t2)
-                                sc2 = d2.get("status_code") if isinstance(d2, dict) else None
-                                if sc2 == 200:
-                                    result["healthy"] = True
-                                    result["invalid_reason"] = None
-                                    result["error"] = None
-                                    return result
-                    except Exception:
-                        pass
-
                     if sc is None:
                         result["error"] = "missing status_code in api-call response"
-                        result["invalid_reason"] = "missing_status_code"
-                    else:
-                        result["invalid_reason"] = f"status_{sc}"
                     return result
         except Exception as e:
             result["error"] = str(e)
-            result["invalid_reason"] = "probe_exception"
             if attempt >= retries:
                 return result
     return result
@@ -2660,19 +2566,18 @@ async def run_probe_async(
             result = await task
             probe_results.append(result)
             checked += 1
-            # 不健康定义：401 / 其他非200状态 / 探测异常
-            if (not result.get("healthy")):
+            if result.get("invalid_401"):
                 invalid_count += 1
 
             if logger and (checked % 50 == 0 or checked == total_candidates):
                 logger.info(
-                    "健康探测进度: 已检查=%s/%s, 不健康=%s",
+                    "401探测进度: 已检查=%s/%s, 命中401=%s",
                     checked,
                     total_candidates,
                     invalid_count,
                 )
 
-    invalid_401 = [r for r in probe_results if not r.get("healthy")]
+    invalid_401 = [r for r in probe_results if r.get("invalid_401")]
     return invalid_401, len(files), len(candidates)
 
 
@@ -2753,7 +2658,7 @@ async def run_clean_401_async(
         if skipped > 0:
             logger.info("保护名单生效: 跳过删除=%s", skipped)
     logger.info(
-        "探测完成: 总账号=%s, codex账号=%s, 不健康账号=%s",
+        "探测完成: 总账号=%s, codex账号=%s, 401失效=%s",
         total_files,
         codex_files,
         len(names),
@@ -2794,8 +2699,8 @@ def run_clean_401(conf: Dict[str, Any], logger: logging.Logger) -> tuple[int, in
         raise RuntimeError("clean 配置缺少 base_url 或 token/cpa_password")
 
     protected_names = pick_conf(conf, "clean", "protected_names", default=[])
-    if not protected_names:
-        protected_names = conf.get("protected_names", []) if isinstance(conf, dict) else []
+    if not protected_names and isinstance(conf, dict):
+        protected_names = conf.get("protected_names", [])
     if not isinstance(protected_names, list):
         protected_names = []
 
@@ -2855,6 +2760,12 @@ def main() -> int:
     conf = load_json(config_path)
     apply_proxy_environment(conf, logger)
 
+    protected_names = pick_conf(conf, "clean", "protected_names", default=[])
+    if not protected_names and isinstance(conf, dict):
+        protected_names = conf.get("protected_names", [])
+    if not isinstance(protected_names, list):
+        protected_names = []
+
     base_url = str(pick_conf(conf, "clean", "base_url", default="") or "").rstrip("/")
     token = str(
         pick_conf(conf, "clean", "token", "cpa_password", default="") or ""
@@ -2880,17 +2791,6 @@ def main() -> int:
     if not base_url or not token:
         logger.error("缺少 clean.base_url 或 clean.token/cpa_password")
         return 2
-
-    protected_names = pick_conf(conf, "clean", "protected_names", default=[])
-    if not protected_names and isinstance(conf, dict):
-        protected_names = conf.get("protected_names", [])
-    if not isinstance(protected_names, list):
-        protected_names = []
-
-    extra_candidates = int(
-        pick_conf(conf, "maintainer", "extra_candidates", default=0) or 0
-    )
-    effective_target = min_candidates + max(0, extra_candidates)
 
     try:
         probed_401, deleted_ok, deleted_fail = run_clean_401(conf, logger)
@@ -2918,28 +2818,19 @@ def main() -> int:
         return 4
 
     logger.info(
-        "删除401后统计: 总账号=%s, candidates=%s, 阈值=%s(基础%s+额外%s)",
+        "删除401后统计: 总账号=%s, candidates=%s, 阈值=%s",
         total_after_clean,
         candidates_after_clean,
-        effective_target,
         min_candidates,
-        max(0, extra_candidates),
     )
 
-    if candidates_after_clean >= effective_target:
+    if candidates_after_clean >= min_candidates:
         logger.info("当前 candidates 已达标，无需补号。")
-        report_protected_status(
-            base_url=base_url,
-            token=token,
-            timeout=args.timeout,
-            user_agent=str(pick_conf(conf, "clean", "user_agent", default=DEFAULT_MGMT_UA) or DEFAULT_MGMT_UA),
-            protected_names=protected_names,
-            logger=logger,
-        )
+        report_protected_status(base_url, token, args.timeout, protected_names, logger)
         logger.info("=== 账号池自动维护结束（成功）===")
         return 0
 
-    gap = effective_target - candidates_after_clean
+    gap = min_candidates - candidates_after_clean
     logger.info("当前 candidates 未达标，缺口=%s，开始补号。", gap)
 
     try:
@@ -2967,23 +2858,14 @@ def main() -> int:
         return 6
 
     logger.info(
-        "补号后统计: 总账号=%s, codex账号=%s, codex目标=%s(基础%s+额外%s)",
+        "补号后统计: 总账号=%s, codex账号=%s, codex目标=%s",
         total_final,
         candidates_final,
-        effective_target,
         min_candidates,
-        max(0, extra_candidates),
     )
-    if candidates_final < effective_target:
+    if candidates_final < min_candidates:
         logger.warning("最终 codex账号数 仍低于阈值，请检查邮箱/OAuth/上传链路。")
-    report_protected_status(
-        base_url=base_url,
-        token=token,
-        timeout=args.timeout,
-        user_agent=str(pick_conf(conf, "clean", "user_agent", default=DEFAULT_MGMT_UA) or DEFAULT_MGMT_UA),
-        protected_names=protected_names,
-        logger=logger,
-    )
+    report_protected_status(base_url, token, args.timeout, protected_names, logger)
     logger.info("=== 账号池自动维护结束（成功）===")
     return 0
 
