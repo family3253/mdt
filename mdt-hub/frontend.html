@@ -7,24 +7,47 @@
   <style>
     body { font-family: Arial, sans-serif; margin: 16px; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
-    #timeline { max-height: 340px; overflow: auto; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; margin-top: 12px; }
+    #timeline { max-height: 300px; overflow: auto; }
     .ev { border-bottom: 1px dashed #e5e5e5; padding: 8px 0; }
     .meta { color: #666; font-size: 12px; }
-    #consensusChart, #speakerChart { height: 280px; }
-    input, button { padding: 6px 8px; margin-right: 6px; }
+    #consensusChart, #speakerChart { height: 260px; }
+    input, button, textarea { padding: 6px 8px; margin-right: 6px; margin-top: 6px; }
+    textarea { width: 98%; height: 70px; }
+    #agentsList { font-size: 13px; }
   </style>
 </head>
 <body>
   <h2>MDT 交互式会诊面板</h2>
+
   <div class="card">
+    <b>会诊输入</b><br/>
     <label>Case ID:</label><input id="caseId" value="CASE-LIVE-001" />
-    <label>临床输入:</label><input id="msg" size="60" value="患者发热低血压，近期广谱抗菌药暴露" />
+    <label>临床输入:</label><input id="msg" size="70" value="患者发热低血压，近期广谱抗菌药暴露" />
     <button onclick="submitDiscussion()">提交讨论</button>
     <span id="status" class="meta"></span>
   </div>
 
-  <div class="row" style="margin-top:12px;">
+  <div class="row">
+    <div class="card">
+      <b>新增 Agent</b><br/>
+      <input id="newAgentId" placeholder="agent_id (e.g. mdt-radiology)" size="28"/>
+      <input id="newAgentRole" placeholder="role (e.g. 影像评估)" size="20"/>
+      <input id="newAgentSpec" placeholder="specialty (e.g. radiology)" size="20"/>
+      <button onclick="createAgent()">新增</button>
+      <div id="agentsList" class="meta"></div>
+    </div>
+
+    <div class="card">
+      <b>给 Agent 喂语料</b><br/>
+      <input id="feedAgentId" placeholder="agent_id" size="24"/>
+      <input id="feedSource" placeholder="source" value="manual" size="14"/>
+      <textarea id="feedContent" placeholder="粘贴指南摘要/院内规范/知识点...\n例如：AKI患者优先使用...并按eGFR调整"></textarea>
+      <button onclick="feedKnowledge()">喂知识</button>
+    </div>
+  </div>
+
+  <div class="row">
     <div class="card">
       <h3>时间线（实时）</h3>
       <div id="timeline"></div>
@@ -35,7 +58,7 @@
     </div>
   </div>
 
-  <div class="card" style="margin-top:12px;">
+  <div class="card">
     <h3>共识收敛曲线</h3>
     <div id="consensusChart"></div>
   </div>
@@ -53,17 +76,8 @@
     const consensusChart = echarts.init(document.getElementById('consensusChart'));
 
     function renderCharts() {
-      speakerChart.setOption({
-        xAxis: { type: 'category', data: Object.keys(speakerCounter) },
-        yAxis: { type: 'value' },
-        series: [{ type: 'bar', data: Object.values(speakerCounter) }]
-      });
-
-      consensusChart.setOption({
-        xAxis: { type: 'category', data: consensusSeries.map(x => x.t) },
-        yAxis: { type: 'value', min: 0, max: 1 },
-        series: [{ type: 'line', smooth: true, data: consensusSeries.map(x => x.v) }]
-      });
+      speakerChart.setOption({ xAxis: { type: 'category', data: Object.keys(speakerCounter) }, yAxis: { type: 'value' }, series: [{ type: 'bar', data: Object.values(speakerCounter) }] });
+      consensusChart.setOption({ xAxis: { type: 'category', data: consensusSeries.map(x => x.t) }, yAxis: { type: 'value', min: 0, max: 1 }, series: [{ type: 'line', smooth: true, data: consensusSeries.map(x => x.v) }] });
     }
 
     function addEvent(ev) {
@@ -71,44 +85,46 @@
       div.className = 'ev';
       div.innerHTML = `<b>${ev.event_type}</b> · ${ev.speaker}<div class='meta'>${ev.timestamp} | round=${ev.round_no} | conf=${ev.confidence ?? '-'}</div><div>${JSON.stringify(ev.payload)}</div>`;
       timeline.prepend(div);
-
       speakerCounter[ev.speaker] = (speakerCounter[ev.speaker] || 0) + 1;
-      if (ev.event_type === 'consensus_updated') {
-        const val = typeof ev.confidence === 'number' ? ev.confidence : 0.8;
-        consensusSeries.push({ t: ev.timestamp.slice(11,19), v: val });
-      }
+      if (ev.event_type === 'consensus_updated') consensusSeries.push({ t: ev.timestamp.slice(11,19), v: typeof ev.confidence === 'number' ? ev.confidence : 0.8 });
       renderCharts();
     }
 
-    ws.onopen = () => {
-      statusEl.textContent = 'WebSocket 已连接';
-      ws.send('ping');
-      setInterval(() => ws.send('ping'), 5000);
-    };
-
-    ws.onmessage = (msg) => {
-      const payload = JSON.parse(msg.data);
-      if (payload.type === 'mdt_event') addEvent(payload.data);
-    };
+    ws.onopen = () => { statusEl.textContent = 'WebSocket 已连接'; ws.send('ping'); setInterval(() => ws.send('ping'), 5000); loadAgents(); };
+    ws.onmessage = (msg) => { const payload = JSON.parse(msg.data); if (payload.type === 'mdt_event') addEvent(payload.data); };
 
     async function submitDiscussion() {
       const caseId = document.getElementById('caseId').value.trim();
       const message = document.getElementById('msg').value.trim();
-      if (!caseId || !message) return;
-
-      // ensure case exists (ignore 409)
-      await fetch(`${API}/cases/open`, {
-        method: 'POST', headers: {'content-type': 'application/json'},
-        body: JSON.stringify({case_id: caseId, patient_summary: {note: 'interactive case'}})
-      });
-
-      const resp = await fetch(`${API}/discussion/submit`, {
-        method: 'POST',
-        headers: {'content-type': 'application/json'},
-        body: JSON.stringify({case_id: caseId, round_no: 1, speaker: 'human_clinician', message})
-      });
+      await fetch(`${API}/cases/open`, { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({case_id: caseId, patient_summary: {note: 'interactive case'}}) });
+      const resp = await fetch(`${API}/discussion/submit`, { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({case_id: caseId, round_no: 1, speaker: 'human_clinician', message}) });
       const data = await resp.json();
       statusEl.textContent = `已提交，生成 ${data.generated_count} 条专家/主持响应`;
+    }
+
+    async function createAgent() {
+      const agent_id = document.getElementById('newAgentId').value.trim();
+      const role = document.getElementById('newAgentRole').value.trim();
+      const specialty = document.getElementById('newAgentSpec').value.trim();
+      const resp = await fetch(`${API}/agents`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({agent_id, role, specialty}) });
+      if (!resp.ok) { statusEl.textContent = `新增失败: ${await resp.text()}`; return; }
+      statusEl.textContent = `已新增 agent: ${agent_id}`;
+      await loadAgents();
+    }
+
+    async function feedKnowledge() {
+      const agent_id = document.getElementById('feedAgentId').value.trim();
+      const source = document.getElementById('feedSource').value.trim() || 'manual';
+      const content = document.getElementById('feedContent').value.trim();
+      const resp = await fetch(`${API}/agents/${agent_id}/knowledge`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({source, content, tags:[]}) });
+      if (!resp.ok) { statusEl.textContent = `喂知识失败: ${await resp.text()}`; return; }
+      statusEl.textContent = `已给 ${agent_id} 注入知识`;
+    }
+
+    async function loadAgents() {
+      const resp = await fetch(`${API}/agents`);
+      const data = await resp.json();
+      document.getElementById('agentsList').textContent = `当前 Agent(${data.count}): ` + data.agents.map(a => `${a.agent_id}[${a.specialty}]`).join(' | ');
     }
   </script>
 </body>

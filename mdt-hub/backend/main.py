@@ -41,6 +41,20 @@ class DiscussionInput(BaseModel):
     message: str
 
 
+class AgentCreate(BaseModel):
+    agent_id: str
+    role: str
+    specialty: str
+    prompt: str = ""
+    enabled: bool = True
+
+
+class KnowledgeFeed(BaseModel):
+    content: str
+    source: str = "manual"
+    tags: list[str] = Field(default_factory=list)
+
+
 class WSManager:
     def __init__(self) -> None:
         self.clients: list[WebSocket] = []
@@ -67,7 +81,7 @@ class WSManager:
 ws_manager = WSManager()
 
 
-SPECIALIST_PROFILES = [
+DEFAULT_SPECIALIST_PROFILES = [
     ("mdt-id", "infectious_disease", "感染来源+抗菌覆盖策略"),
     ("mdt-micro", "microbiology", "病原/标本质量与耐药解释"),
     ("mdt-pharm", "clinical_pharmacy", "剂量与肾功能分层，药物相互作用"),
@@ -113,6 +127,30 @@ def init_db() -> None:
             )
             """
         )
+        c.execute(
+            """
+            create table if not exists mdt_agents (
+              agent_id text primary key,
+              role text not null,
+              specialty text not null,
+              prompt text,
+              enabled integer not null default 1,
+              created_at text not null
+            )
+            """
+        )
+        c.execute(
+            """
+            create table if not exists mdt_knowledge (
+              id integer primary key autoincrement,
+              agent_id text not null,
+              content text not null,
+              source text not null,
+              tags text,
+              created_at text not null
+            )
+            """
+        )
 
 
 def _ensure_case(case_id: str) -> None:
@@ -155,12 +193,43 @@ def _latest_round(case_id: str) -> int:
     return int(row["r"] or 0)
 
 
+def _seed_default_agents() -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    with conn() as c:
+        for agent_id, specialty, lens in DEFAULT_SPECIALIST_PROFILES:
+            c.execute(
+                "insert or ignore into mdt_agents(agent_id, role, specialty, prompt, enabled, created_at) values (?,?,?,?,1,?)",
+                (agent_id, lens, specialty, "", now),
+            )
+
+
+def _load_enabled_agents() -> list[tuple[str, str, str]]:
+    with conn() as c:
+        rows = c.execute("select agent_id, specialty, role from mdt_agents where enabled=1 order by created_at asc").fetchall()
+    if not rows:
+        return DEFAULT_SPECIALIST_PROFILES
+    return [(r["agent_id"], r["specialty"], r["role"]) for r in rows]
+
+
+def _knowledge_snippet(agent_id: str, limit: int = 2) -> str:
+    with conn() as c:
+        rows = c.execute(
+            "select content from mdt_knowledge where agent_id=? order by id desc limit ?",
+            (agent_id, limit),
+        ).fetchall()
+    if not rows:
+        return ""
+    return " | ".join((r["content"][:60] for r in rows))
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    _seed_default_agents()
 
 
 init_db()
+_seed_default_agents()
 
 
 @app.get("/health")
@@ -195,6 +264,42 @@ async def ingest_event(event: MDTEvent) -> dict[str, Any]:
     return {"accepted": True, "event": body}
 
 
+@app.get("/agents")
+def list_agents() -> dict[str, Any]:
+    with conn() as c:
+        rows = c.execute("select agent_id, role, specialty, prompt, enabled, created_at from mdt_agents order by created_at asc").fetchall()
+    return {"count": len(rows), "agents": [dict(r) for r in rows]}
+
+
+@app.post("/agents")
+def create_agent(payload: AgentCreate) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
+    with conn() as c:
+        try:
+            c.execute(
+                "insert into mdt_agents(agent_id, role, specialty, prompt, enabled, created_at) values (?,?,?,?,?,?)",
+                (payload.agent_id, payload.role, payload.specialty, payload.prompt, 1 if payload.enabled else 0, now),
+            )
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=409, detail="agent_id already exists")
+    return {"ok": True, "agent_id": payload.agent_id}
+
+
+@app.post("/agents/{agent_id}/knowledge")
+def feed_knowledge(agent_id: str, payload: KnowledgeFeed) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
+    tags = json.dumps(payload.tags, ensure_ascii=False)
+    with conn() as c:
+        exists = c.execute("select agent_id from mdt_agents where agent_id=?", (agent_id,)).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="agent not found")
+        c.execute(
+            "insert into mdt_knowledge(agent_id, content, source, tags, created_at) values (?,?,?,?,?)",
+            (agent_id, payload.content, payload.source, tags, now),
+        )
+    return {"ok": True, "agent_id": agent_id}
+
+
 @app.post("/discussion/submit")
 async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
     """模拟现实 MDT：先录入临床医生发言，再按角色生成一轮专家回应。"""
@@ -213,7 +318,8 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
     await ws_manager.broadcast({"type": "mdt_event", "data": human_body})
 
     generated: list[dict[str, Any]] = []
-    for agent_id, specialty, lens in SPECIALIST_PROFILES:
+    for agent_id, specialty, lens in _load_enabled_agents():
+        learned = _knowledge_snippet(agent_id)
         ev = MDTEvent(
             case_id=payload.case_id,
             round_no=round_no,
@@ -222,6 +328,7 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
             specialty=specialty,
             payload={
                 "discussion": f"针对输入“{payload.message}”，从{lens}角度建议补充评估并形成可执行方案。",
+                "learned_context": learned,
                 "source": "simulated_role_response",
             },
             confidence=0.75,
