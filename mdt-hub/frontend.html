@@ -206,7 +206,7 @@
         <input id="newAgentId" placeholder="agent_id e.g. mdt-radiology" />
         <input id="newAgentRole" placeholder="角色 e.g. 影像评估" />
         <input id="newAgentSpec" placeholder="specialty e.g. radiology" />
-        <input id="newAgentModel" list="modelOptions" placeholder="可选：模型 e.g. openai-codex/gpt-5.3-codex" />
+        <select id="newAgentModel"></select>
         <textarea id="newAgentPrompt" placeholder="可选：自定义补充提示词"></textarea>
         <button onclick="createAgent()">新增</button>
       </div>
@@ -231,13 +231,6 @@
         <div id="agentModelList"></div>
       </div>
     </aside>
-
-    <datalist id="modelOptions">
-      <option value="openai-codex/gpt-5.3-codex"></option>
-      <option value="openai/gpt-4.1"></option>
-      <option value="anthropic/claude-3-7-sonnet"></option>
-      <option value="google/gemini-2.5-pro"></option>
-    </datalist>
 
     <main class="main">
       <div class="tabs">
@@ -275,8 +268,11 @@
   </div>
 
   <script>
-    const API = `http://${location.hostname}:8788`;
-    const ws = new WebSocket(`ws://${location.hostname}:8788/ws/events`);
+    const BASE_HOST = location.hostname || '127.0.0.1';
+    const API = `http://${BASE_HOST}:8788`;
+    const WS_PROTO = location.protocol === 'https:' ? 'wss' : 'ws';
+    const WS_URL = `${WS_PROTO}://${BASE_HOST}:8788/ws/events`;
+    const ws = new WebSocket(WS_URL);
     const wsState = document.getElementById('wsState');
     const statusEl = document.getElementById('status');
     const timeline = document.getElementById('timeline');
@@ -287,6 +283,11 @@
     const speakerChart = echarts.init(document.getElementById('speakerChart'));
     const consensusChart = echarts.init(document.getElementById('consensusChart'));
     const conflictChart = echarts.init(document.getElementById('conflictChart'));
+    let availableModels = [];
+    let defaultModel = 'openai-codex/gpt-5.3-codex';
+    let pingTimer = null;
+    let pollTimer = null;
+    const seenEventIds = new Set();
 
     const AGENT_PERSONA = {
       'mdt-orchestrator': { emoji: '🎯', title: '会诊主持人', vibe: '冷静统筹型' },
@@ -468,6 +469,10 @@
     }
 
     function addEvent(ev) {
+      if (ev && typeof ev.event_id !== 'undefined') {
+        if (seenEventIds.has(ev.event_id)) return;
+        seenEventIds.add(ev.event_id);
+      }
       const div = document.createElement('div');
       div.className = 'ev';
       div.innerHTML = `<b>${ev.event_type}</b> · ${ev.speaker}<div class='muted'>${ev.timestamp} | round=${ev.round_no} | conf=${ev.confidence ?? '-'}</div><div class='muted'>${JSON.stringify(ev.payload)}</div>`;
@@ -481,23 +486,64 @@
       updateSeat(ev);
     }
 
-    ws.onopen = () => {
-      wsState.textContent = 'WebSocket 已连接';
-      wsState.style.background = 'rgba(46,204,113,.2)';
-      ws.send('ping');
-      setInterval(() => ws.send('ping'), 5000);
-      loadAgents();
-      renderRoom();
-      renderSectionPanel();
-    };
-    ws.onclose = () => {
-      wsState.textContent = 'WebSocket 断开';
-      wsState.style.background = 'rgba(255,95,109,.2)';
-    };
-    ws.onmessage = (msg) => {
-      const payload = JSON.parse(msg.data);
-      if (payload.type === 'mdt_event') addEvent(payload.data);
-    };
+    function clearPing() {
+      if (pingTimer) clearInterval(pingTimer);
+      pingTimer = null;
+    }
+
+    function startPollingFallback() {
+      if (pollTimer) return;
+      pollTimer = setInterval(loadEventsFallback, 3000);
+      loadEventsFallback();
+    }
+
+    function stopPollingFallback() {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = null;
+    }
+
+    async function loadEventsFallback() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) return;
+      try {
+        const resp = await fetch(`${API}/cases/${caseId}/events`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        (data.events || []).forEach(ev => {
+          if (!seenEventIds.has(ev.event_id)) addEvent(ev);
+        });
+      } catch (_) {
+        // 静默重试
+      }
+    }
+
+    function connectWS() {
+      ws = new WebSocket(WS_URL);
+
+      ws.onopen = async () => {
+        wsState.textContent = 'WebSocket 已连接';
+        wsState.style.background = 'rgba(46,204,113,.2)';
+        stopPollingFallback();
+        clearPing();
+        ws.send('ping');
+        pingTimer = setInterval(() => {
+          try { ws.send('ping'); } catch (_) {}
+        }, 5000);
+      };
+
+      ws.onclose = () => {
+        wsState.textContent = 'WebSocket 断开（轮询模式）';
+        wsState.style.background = 'rgba(255,95,109,.2)';
+        clearPing();
+        startPollingFallback();
+        setTimeout(connectWS, 3000);
+      };
+
+      ws.onmessage = (msg) => {
+        const payload = JSON.parse(msg.data);
+        if (payload.type === 'mdt_event') addEvent(payload.data);
+      };
+    }
 
     async function submitDiscussion() {
       const caseId = document.getElementById('caseId').value.trim();
@@ -626,6 +672,34 @@
       statusEl.textContent = `病历上传完成，提取影像${(data.sections?.imaging||[]).length}条，检验${(data.sections?.labs||[]).length}条，用药${(data.sections?.medications||[]).length}条`;
     }
 
+    function modelOptionsHtml(selectedValue = '') {
+      const selected = (selectedValue || '').trim();
+      const opts = [`<option value="">默认模型（${defaultModel}）</option>`];
+      (availableModels || []).forEach(m => {
+        const safe = String(m || '');
+        const sel = safe === selected ? 'selected' : '';
+        opts.push(`<option value="${safe}" ${sel}>${safe}</option>`);
+      });
+      return opts.join('');
+    }
+
+    async function loadAvailableModels() {
+      const resp = await fetch(`${API}/models/available`);
+      const data = await resp.json();
+      if (!resp.ok) {
+        statusEl.textContent = `加载模型列表失败: ${JSON.stringify(data)}`;
+        return;
+      }
+      availableModels = (data.models || []).map(x => String(x || '').trim()).filter(Boolean);
+      defaultModel = String(data.default_model || defaultModel);
+
+      const newAgentModel = document.getElementById('newAgentModel');
+      newAgentModel.innerHTML = modelOptionsHtml('');
+      if (data.fallback) {
+        statusEl.textContent = `模型列表使用降级配置：${data.note || 'fallback'}`;
+      }
+    }
+
     async function saveAgentModel(agentId, inputId) {
       const model = document.getElementById(inputId).value.trim();
       const resp = await fetch(`${API}/agents/${agentId}/model`, {
@@ -655,7 +729,7 @@
         row.className = 'agent-model-row';
         const inputId = `agent-model-${a.agent_id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
         row.innerHTML = `
-          <input id="${inputId}" list="modelOptions" value="${a.model || ''}" placeholder="${a.agent_id} 模型（留空=默认）" />
+          <select id="${inputId}">${modelOptionsHtml(a.model || '')}</select>
           <button onclick="saveAgentModel('${a.agent_id}', '${inputId}')">保存模型</button>
         `;
         modelBox.appendChild(row);

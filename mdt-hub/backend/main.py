@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -30,6 +31,13 @@ DB_PATH = BASE_DIR / "mdt.db"
 
 app = FastAPI(title="MDT Hub API", version="0.3.0")
 DEFAULT_AGENT_MODEL = "openai-codex/gpt-5.3-codex"
+FALLBACK_MODEL_OPTIONS = [
+    "openai-codex/gpt-5.3-codex",
+    "openai/gpt-4.1",
+    "anthropic/claude-3-7-sonnet",
+    "google/gemini-2.5-pro",
+]
+logger = logging.getLogger("mdt_hub")
 
 
 class MDTEvent(BaseModel):
@@ -396,6 +404,59 @@ def _store_case_doc(case_id: str, source: str, content: str, doc_type: str = "re
     return {"doc_id": doc_id, "case_id": case_id, "sections": sections}
 
 
+def _candidate_openclaw_config_paths() -> list[Path]:
+    home = Path.home()
+    return [
+        home / ".openclaw" / "openclaw.json",
+        home / ".config" / "openclaw" / "openclaw.json",
+        home / ".config" / "openclaw" / "config.json",
+    ]
+
+
+def _load_models_from_openclaw_config() -> tuple[list[str], Optional[str], Optional[str], str]:
+    """Return (models, default_model, source_path, note)."""
+    last_err = ""
+    for cfg in _candidate_openclaw_config_paths():
+        if not cfg.exists() or not cfg.is_file():
+            continue
+        try:
+            data = json.loads(cfg.read_text(encoding="utf-8"))
+            values: set[str] = set()
+
+            defaults = (data.get("agents") or {}).get("defaults") or {}
+            default_model = ((defaults.get("model") or {}).get("primary") or "").strip() or None
+
+            for m in ((defaults.get("model") or {}).get("fallbacks") or []):
+                mm = str(m).strip()
+                if mm:
+                    values.add(mm)
+
+            for m in ((defaults.get("models") or {}).keys()):
+                mm = str(m).strip()
+                if mm:
+                    values.add(mm)
+
+            providers = ((data.get("models") or {}).get("providers") or {})
+            for provider_name, provider_cfg in providers.items():
+                for item in (provider_cfg or {}).get("models") or []:
+                    if isinstance(item, dict):
+                        mid = str(item.get("id") or item.get("name") or "").strip()
+                    else:
+                        mid = str(item).strip()
+                    if mid:
+                        values.add(mid if "/" in mid else f"{provider_name}/{mid}")
+
+            models = sorted(values)
+            if not models:
+                return [], default_model, str(cfg), "config_loaded_but_no_models"
+            return models, default_model, str(cfg), "config_loaded"
+        except Exception as exc:  # pragma: no cover
+            last_err = f"{type(exc).__name__}: {exc}"
+            logger.warning("Failed parsing OpenClaw config %s: %s", cfg, last_err)
+
+    return [], None, None, (last_err or "config_not_found")
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
@@ -409,6 +470,30 @@ _seed_default_agents()
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"ok": True, "service": "mdt-hub", "db": str(DB_PATH)}
+
+
+@app.get("/models/available")
+def list_available_models() -> dict[str, Any]:
+    models, default_model, source_path, note = _load_models_from_openclaw_config()
+    if models:
+        out_default = default_model or DEFAULT_AGENT_MODEL
+        logger.info("Loaded %d available models from %s", len(models), source_path)
+        return {
+            "models": models,
+            "default_model": out_default,
+            "source": source_path,
+            "fallback": False,
+            "note": note,
+        }
+
+    logger.warning("Model list fallback enabled: note=%s", note)
+    return {
+        "models": FALLBACK_MODEL_OPTIONS,
+        "default_model": default_model or DEFAULT_AGENT_MODEL,
+        "source": source_path or "builtin-fallback",
+        "fallback": True,
+        "note": f"fallback_used:{note}",
+    }
 
 
 @app.post("/cases/open")
