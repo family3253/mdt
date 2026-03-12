@@ -765,8 +765,15 @@
       };
     });
 
-    renderRoom();
-    renderSectionPanel();
+    async function initPage() {
+      renderRoom();
+      renderSectionPanel();
+      await loadAvailableModels();
+      await loadAgents();
+      connectWS();
+    }
+
+    initPage();
   </script>
 </body>
 </html>
