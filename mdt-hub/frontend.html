@@ -802,9 +802,17 @@
     async function initPage() {
       renderRoom();
       renderSectionPanel();
-      await loadAvailableModels();
-      await loadAgents();
+
+      // 先启动实时链路，避免被其他初始化请求阻塞在“连接中”
       connectWS();
+
+      // 数据初始化并行执行，任一失败不影响主界面连接状态
+      Promise.allSettled([loadAvailableModels(), loadAgents()]).then((results) => {
+        const failed = results.filter(r => r.status === 'rejected').length;
+        if (failed > 0) {
+          statusEl.textContent = `初始化完成（${failed}项加载失败，可重试）`;
+        }
+      });
     }
 
     initPage();

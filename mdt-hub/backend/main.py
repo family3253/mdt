@@ -557,20 +557,26 @@ def list_available_models() -> dict[str, Any]:
 def open_case(payload: CaseOpen) -> dict[str, Any]:
     opened_at = datetime.now(timezone.utc).isoformat()
     with conn() as c:
-        try:
-            c.execute(
-                "insert into cases(case_id,status,opened_at,patient_summary,danger_flag) values (?,?,?,?,?)",
-                (
-                    payload.case_id,
-                    payload.status,
-                    opened_at,
-                    json.dumps(payload.patient_summary, ensure_ascii=False),
-                    1 if payload.danger_flag else 0,
-                ),
-            )
-        except sqlite3.IntegrityError:
-            raise HTTPException(status_code=409, detail="case_id already exists")
-    return {"ok": True, "case_id": payload.case_id, "opened_at": opened_at}
+        existed = c.execute("select opened_at from cases where case_id=?", (payload.case_id,)).fetchone()
+        if existed:
+            return {
+                "ok": True,
+                "case_id": payload.case_id,
+                "opened_at": existed["opened_at"],
+                "already_exists": True,
+            }
+
+        c.execute(
+            "insert into cases(case_id,status,opened_at,patient_summary,danger_flag) values (?,?,?,?,?)",
+            (
+                payload.case_id,
+                payload.status,
+                opened_at,
+                json.dumps(payload.patient_summary, ensure_ascii=False),
+                1 if payload.danger_flag else 0,
+            ),
+        )
+    return {"ok": True, "case_id": payload.case_id, "opened_at": opened_at, "already_exists": False}
 
 
 @app.post("/events")

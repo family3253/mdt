@@ -18,7 +18,7 @@
 | 网址病历导入 | `POST /cases/{case_id}/documents/url` | `url`,`source` | `doc_id`,`sections{imaging,labs,medications}` | `病历网址导入失败: ...` |
 | 文件病历上传 | `POST /cases/{case_id}/documents/upload` (multipart) | `file` | `doc_id`,`sections{...}` | `病历文件导入失败: ...` |
 | 加载最近病历解析结果 | `GET /cases/{case_id}/documents` | - | `documents[]`（按 id 倒序） | `加载失败: ...` |
-| 提交会诊讨论（按钮） | `POST /cases/open`（预开病例） + `POST /discussion/submit` | `case_id`,`message`,`round_no`,`speaker`,`confirmed_sections`,`enable_docs_context` | `generated_count`,`confirmed_adopted_count`,`docs_context_doc_count` | `提交失败: ...` |
+| 提交会诊讨论（按钮） | `POST /cases/open`（预开病例，幂等） + `POST /discussion/submit` | `case_id`,`message`,`round_no`,`speaker`,`confirmed_sections`,`enable_docs_context` | `generated_count`,`confirmed_adopted_count`,`docs_context_doc_count` | `提交失败: ...` |
 | 二轮互评（按钮） | `POST /discussion/review` | `case_id`,`from_round`,`to_round` | `generated_count` | `二轮互评失败: ...` |
 | 刷新冲突图（按钮） | `GET /cases/{case_id}/conflicts` | - | `nodes[]`,`edges[]` | `加载冲突图失败: ...` |
 | WebSocket 实时事件 | `WS /ws/events` | 客户端 ping 文本 | `{"type":"mdt_event","data":...}` | 断连后 UI 显示“WebSocket 断开（轮询模式）” |
@@ -41,21 +41,17 @@
 
 ## 3) 本次修复（最小改动）
 
-### 修复点 A：WebSocket 连接变量可重连
-- 问题：前端将 `ws` 声明为 `const`，在 `connectWS()` 中再次赋值会抛错（重连逻辑失效）。
-- 修复：改为 `let ws = null;`，由 `connectWS()` 统一创建连接。
+### 修复点 A：`/cases/open` 改为幂等（后端）
+- 问题：前端每次提交讨论都会先调用 `POST /cases/open`；历史实现当病例已存在时返回 409，不利于前端流程一致性。
+- 修复：`open_case()` 改为幂等：
+  - 已存在：`200` + `{"ok":true,"already_exists":true,...}`
+  - 新建成功：`200` + `{"ok":true,"already_exists":false,...}`
+- 兼容性：不影响既有前端调用，且减少无意义错误分支。
 
-### 修复点 B：二轮互评失败分支缺失
-- 问题：`runReviewRound()` 未判断 `resp.ok`，失败时也显示“完成”。
-- 修复：增加 `!resp.ok` 分支，显示 `二轮互评失败: ...`。
-
-### 修复点 C：Agent 列表加载失败分支缺失
-- 问题：`loadAgents()` 未判断 `resp.ok`。
-- 修复：增加失败提示 `加载 Agent 列表失败: ...`。
-
-### 修复点 D：冲突图加载失败分支缺失
-- 问题：`loadConflictGraph()` 未判断 `resp.ok`。
-- 修复：增加失败提示 `加载冲突图失败: ...`。
+### 修复点 B：前端补齐关键失败分支（可读错误）
+- `runReviewRound()` 新增 `!resp.ok` 分支，避免失败时误报成功。
+- `loadAgents()` 新增 `!resp.ok` 分支，失败时提示 `加载 Agent 列表失败`。
+- `loadConflictGraph()` 新增 `!resp.ok` 分支，失败时提示 `加载冲突图失败`。
 
 ## 4) 关键流程本地验证记录
 
