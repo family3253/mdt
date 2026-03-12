@@ -1,9 +1,9 @@
 {
   "lastChecks": {},
   "lastMemoryMaintenance": "2026-03-08",
-  "lastGlobalAutoFixAt": "2026-03-11T11:31:00+08:00",
-  "lastGlobalAutoFixReason": "openclaw status gateway timeout after 10000ms during heartbeat check",
-  "lastGlobalAutoFixResult": "sessions cleanup + gateway restart + status recheck recovered",
+  "lastGlobalAutoFixAt": "2026-03-12T12:35:00+08:00",
+  "lastGlobalAutoFixReason": "openclaw status reports gateway unreachable (timeout) during heartbeat check",
+  "lastGlobalAutoFixResult": "sessions cleanup executed; gateway restart repeatedly aborted by signal 15 due doctor warning output; post-check still shows gateway unreachable timeout",
   "lastGlobalAutoFixChannels": [
     "webchat",
     "discord",
@@ -11,8 +11,8 @@
     "feishu",
     "wecom"
   ],
-  "lastGlobalHeartbeatCheckAt": "2026-03-12T01:01:00+08:00",
-  "lastGlobalHeartbeatCheckResult": "openclaw status checked; excluded telegram per HEARTBEAT.md; non-telegram sessions show no >=75% token pressure and no timeout/channel-state anomalies in status output.",
+  "lastGlobalHeartbeatCheckAt": "2026-03-13T03:25:00+08:00",
+  "lastGlobalHeartbeatCheckResult": "openclaw status healthy: gateway reachable (~32ms), all enabled channel states OK (excluding Telegram scope rule), no gateway/delivery/announce timeout signals, and active session token usage below 75% (main 14%); no auto-fix needed.",
   "lastGlobalHeartbeatCheckChannels": [
     "webchat",
     "discord",
