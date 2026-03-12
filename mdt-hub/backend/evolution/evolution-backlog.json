@@ -1,0 +1,27 @@
+{
+  "generated_at": "2026-03-12T12:36:47.829437+00:00",
+  "cases": 7,
+  "events": 66,
+  "avg_convergence_steps": 5.86,
+  "conflict_edges": 12,
+  "oppose_ratio": 0.5,
+  "event_type_count": {
+    "agent_opinion": 37,
+    "consensus_updated": 8,
+    "case_opened": 1,
+    "conflict_detected": 3,
+    "discussion_message": 5,
+    "agent_review": 12
+  },
+  "speaker_count": {
+    "mdt-id": 10,
+    "mdt-pharm": 10,
+    "mdt-orchestrator": 12,
+    "mdt-micro": 8,
+    "mdt-icu": 8,
+    "mdt-evidence": 8,
+    "human_clinician": 5,
+    "mdt-radiology": 5
+  },
+  "backlog": []
+}
