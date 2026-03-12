@@ -152,6 +152,18 @@
       <div id="status" class="muted" style="margin-top:8px;">等待操作</div>
 
       <div class="panel">
+        <b>连接诊断</b>
+        <div id="diagApi" class="muted" style="margin-top:6px;"></div>
+        <div id="diagModels" class="muted" style="margin-top:4px;"></div>
+        <div id="diagAgents" class="muted" style="margin-top:4px;"></div>
+        <div id="diagPoll" class="muted" style="margin-top:4px;"></div>
+        <div class="btn-row" style="margin-top:8px;">
+          <button onclick="retryLoadModels()">重试加载模型</button>
+          <button onclick="retryLoadAgents()">重试加载 Agent</button>
+        </div>
+      </div>
+
+      <div class="panel">
         <b>会诊输入</b>
         <input id="caseId" value="CASE-LIVE-001" placeholder="Case ID" />
         <textarea id="msg" placeholder="输入临床问题...">患者发热低血压，近期广谱抗菌药暴露，伴 AKI 风险</textarea>
@@ -273,14 +285,21 @@
 
   <script>
     const BASE_HOST = location.hostname || '127.0.0.1';
-    const API = `http://${BASE_HOST}:8788`;
     const WS_PROTO = location.protocol === 'https:' ? 'wss' : 'ws';
-    const WS_URL = `${WS_PROTO}://${BASE_HOST}:8788/ws/events`;
+    const IS_BACKEND_ORIGIN = location.port === '8788';
+    const API = IS_BACKEND_ORIGIN ? `${location.protocol}//${location.host}` : `http://${BASE_HOST}:8788`;
+    const WS_URL = IS_BACKEND_ORIGIN
+      ? `${WS_PROTO}://${location.host}/ws/events`
+      : `${WS_PROTO}://${BASE_HOST}:8788/ws/events`;
     let ws = null;
     const wsState = document.getElementById('wsState');
     const statusEl = document.getElementById('status');
     const timeline = document.getElementById('timeline');
     const room = document.getElementById('room');
+    const diagApi = document.getElementById('diagApi');
+    const diagModels = document.getElementById('diagModels');
+    const diagAgents = document.getElementById('diagAgents');
+    const diagPoll = document.getElementById('diagPoll');
 
     const speakerCounter = {};
     const consensusSeries = [];
@@ -293,6 +312,13 @@
     let pollTimer = null;
     let wsConnectTimeout = null;
     const seenEventIds = new Set();
+    const pollBackoffDelays = [3000, 5000, 8000];
+    let pollBackoffIndex = 0;
+    const diagState = {
+      models: { status: '-', durationMs: '-', at: '-' },
+      agents: { status: '-', durationMs: '-', at: '-' },
+      pollLastSuccess: '-',
+    };
 
     const AGENT_PERSONA = {
       'mdt-orchestrator': { emoji: '🎯', title: '会诊主持人', vibe: '冷静统筹型' },
@@ -341,6 +367,58 @@
         `;
         room.appendChild(div);
       });
+    }
+
+    function formatTime(ts) {
+      if (!ts) return '-';
+      const d = new Date(ts);
+      if (Number.isNaN(d.getTime())) return '-';
+      return d.toLocaleTimeString();
+    }
+
+    function updateDiagnostics() {
+      diagApi.textContent = `API: ${API}`;
+      diagModels.textContent = `models: ${diagState.models.status} | ${diagState.models.durationMs}ms | ${formatTime(diagState.models.at)}`;
+      diagAgents.textContent = `agents: ${diagState.agents.status} | ${diagState.agents.durationMs}ms | ${formatTime(diagState.agents.at)}`;
+      diagPoll.textContent = `轮询最近成功: ${formatTime(diagState.pollLastSuccess)} | 当前间隔: ${pollBackoffDelays[pollBackoffIndex] / 1000}s`;
+    }
+
+    function toErrorMessage(err, context = '请求失败') {
+      if (!err) return context;
+      if (err.message) return `${context}: ${err.message}`;
+      return `${context}: ${String(err)}`;
+    }
+
+    async function requestWithMeta(path, options = {}, metaKey = '') {
+      const started = performance.now();
+      try {
+        const resp = await fetch(`${API}${path}`, options);
+        const durationMs = Math.round(performance.now() - started);
+        let data = null;
+        try {
+          data = await resp.json();
+        } catch (_) {
+          data = null;
+        }
+
+        if (metaKey && diagState[metaKey]) {
+          diagState[metaKey] = { status: `HTTP ${resp.status}`, durationMs, at: Date.now() };
+          updateDiagnostics();
+        }
+
+        if (!resp.ok) {
+          const detail = data?.message || data?.detail || JSON.stringify(data || {});
+          throw new Error(`HTTP ${resp.status}: ${detail}`);
+        }
+        return { data, status: resp.status, durationMs };
+      } catch (e) {
+        const durationMs = Math.round(performance.now() - started);
+        if (metaKey && diagState[metaKey]) {
+          diagState[metaKey] = { status: e?.message || 'request error', durationMs, at: Date.now() };
+          updateDiagnostics();
+        }
+        throw e;
+      }
     }
 
     function normalizeSectionItems(items) {
@@ -428,17 +506,19 @@
 
     async function loadLatestParsedSections() {
       const caseId = document.getElementById('caseId').value.trim();
-      const resp = await fetch(`${API}/cases/${caseId}/documents`);
-      if (!resp.ok) { statusEl.textContent = `加载失败: ${await resp.text()}`; return; }
-      const data = await resp.json();
-      const latest = (data.documents || [])[0];
-      if (!latest) {
-        resetSectionPanel();
-        statusEl.textContent = '当前病例暂无解析病历';
-        return;
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/documents`);
+        const latest = (data.documents || [])[0];
+        if (!latest) {
+          resetSectionPanel();
+          statusEl.textContent = '当前病例暂无解析病历';
+          return;
+        }
+        applySections(latest.sections || {});
+        statusEl.textContent = `已加载最近病历解析结果（文档ID ${latest.id}）`;
+      } catch (e) {
+        statusEl.textContent = toErrorMessage(e, '加载失败');
       }
-      applySections(latest.sections || {});
-      statusEl.textContent = `已加载最近病历解析结果（文档ID ${latest.id}）`;
     }
 
     function updateSeat(ev) {
@@ -496,29 +576,40 @@
       pingTimer = null;
     }
 
+    function scheduleNextPoll(delayMs = pollBackoffDelays[pollBackoffIndex]) {
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = setTimeout(loadEventsFallback, delayMs);
+      updateDiagnostics();
+    }
+
     function startPollingFallback() {
-      if (pollTimer) return;
-      pollTimer = setInterval(loadEventsFallback, 3000);
-      loadEventsFallback();
+      scheduleNextPoll(0);
     }
 
     function stopPollingFallback() {
-      if (pollTimer) clearInterval(pollTimer);
+      if (pollTimer) clearTimeout(pollTimer);
       pollTimer = null;
+      pollBackoffIndex = 0;
+      updateDiagnostics();
     }
 
     async function loadEventsFallback() {
       const caseId = document.getElementById('caseId').value.trim();
-      if (!caseId) return;
+      if (!caseId) {
+        scheduleNextPoll();
+        return;
+      }
       try {
-        const resp = await fetch(`${API}/cases/${caseId}/events`);
-        if (!resp.ok) return;
-        const data = await resp.json();
-        (data.events || []).forEach(ev => {
+        const { data } = await requestWithMeta(`/cases/${caseId}/events`);
+        (data?.events || []).forEach(ev => {
           if (!seenEventIds.has(ev.event_id)) addEvent(ev);
         });
+        pollBackoffIndex = 0;
+        diagState.pollLastSuccess = Date.now();
       } catch (_) {
-        // 静默重试
+        pollBackoffIndex = Math.min(pollBackoffIndex + 1, pollBackoffDelays.length - 1);
+      } finally {
+        scheduleNextPoll();
       }
     }
 
@@ -815,6 +906,11 @@
       wsState.textContent = '轮询模式（WebSocket 已停用）';
       wsState.style.background = 'rgba(243,156,18,.2)';
       startPollingFallback();
+      if (IS_BACKEND_ORIGIN) {
+        connectWS();
+      } else {
+        statusEl.textContent = '建议通过 :8788 打开 frontend.html 以启用同源 WebSocket';
+      }
 
       // 数据初始化并行执行，任一失败不影响主界面可用性
       Promise.allSettled([loadAvailableModels(), loadAgents()]).then((results) => {

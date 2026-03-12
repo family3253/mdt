@@ -5,13 +5,16 @@ import json
 import logging
 import re
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 import requests
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 try:
@@ -38,6 +41,17 @@ FALLBACK_MODEL_OPTIONS = [
     "google/gemini-2.5-pro",
 ]
 logger = logging.getLogger("mdt_hub")
+OBSERVED_PATH_PATTERNS = [
+    re.compile(r"^/models/available$"),
+    re.compile(r"^/agents$"),
+    re.compile(r"^/agents/[^/]+/model$"),
+    re.compile(r"^/cases/[^/]+/events$"),
+    re.compile(r"^/discussion/submit$"),
+]
+
+
+def _should_log_path(path: str) -> bool:
+    return any(p.match(path) for p in OBSERVED_PATH_PATTERNS)
 
 
 class MDTEvent(BaseModel):
@@ -524,9 +538,76 @@ init_db()
 _seed_default_agents()
 
 
+@app.middleware("http")
+async def access_log_middleware(request: Request, call_next):
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        if _should_log_path(request.url.path):
+            logger.exception("access path=%s method=%s status=500 elapsed_ms=%s", request.url.path, request.method, elapsed_ms)
+        raise
+
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    if _should_log_path(request.url.path):
+        logger.info(
+            "access path=%s method=%s status=%s elapsed_ms=%s",
+            request.url.path,
+            request.method,
+            response.status_code,
+            elapsed_ms,
+        )
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, ensure_ascii=False)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": detail, "message": detail},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    detail = "request validation failed"
+    return JSONResponse(
+        status_code=422,
+        content={"detail": detail, "message": detail, "errors": exc.errors()},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("unhandled error path=%s", request.url.path)
+    detail = f"internal server error: {type(exc).__name__}"
+    return JSONResponse(status_code=500, content={"detail": detail, "message": detail})
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"ok": True, "service": "mdt-hub", "db": str(DB_PATH)}
+
+
+@app.get("/frontend.html")
+def frontend_page() -> FileResponse:
+    frontend = BASE_DIR.parent / "frontend.html"
+    if not frontend.exists():
+        raise HTTPException(status_code=404, detail="frontend.html not found")
+    return FileResponse(frontend)
+
+
+@app.get("/healthz")
+def healthz() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "service": "mdt-hub",
+        "db": str(DB_PATH),
+        "time": datetime.now(timezone.utc).isoformat(),
+        "version": app.version,
+    }
 
 
 @app.get("/models/available")
