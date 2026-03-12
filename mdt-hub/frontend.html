@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>MDT Event Stream Demo</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    #events { margin-top: 12px; }
+    .ev { padding: 8px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 8px; }
+    .meta { color: #666; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h2>MDT 讨论实时流</h2>
+  <p>连接 <code>/ws/events</code>，实时显示会诊事件</p>
+  <div id="events"></div>
+
+  <script>
+    const box = document.getElementById('events');
+    const ws = new WebSocket(`ws://${location.hostname}:8788/ws/events`);
+
+    ws.onopen = () => {
+      const div = document.createElement('div');
+      div.className = 'ev';
+      div.textContent = 'WebSocket connected';
+      box.prepend(div);
+      ws.send('ping');
+      setInterval(() => ws.send('ping'), 5000);
+    };
+
+    ws.onmessage = (msg) => {
+      const data = JSON.parse(msg.data);
+      const ev = data.data;
+      const div = document.createElement('div');
+      div.className = 'ev';
+      div.innerHTML = `
+        <div><b>${ev.event_type}</b> · ${ev.speaker}</div>
+        <div class="meta">case=${ev.case_id} round=${ev.round_no} conf=${ev.confidence ?? '-'}</div>
+        <pre>${JSON.stringify(ev.payload, null, 2)}</pre>
+      `;
+      box.prepend(div);
+    };
+  </script>
+</body>
+</html>
