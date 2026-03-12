@@ -32,6 +32,7 @@ except Exception:  # pragma: no cover
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "mdt.db"
+FRONTEND_PATH = BASE_DIR.parent / "frontend.html"
 
 app = FastAPI(title="MDT Hub API", version="0.3.0")
 DEFAULT_AGENT_MODEL = "openai-codex/gpt-5.3-codex"
@@ -620,12 +621,18 @@ def health() -> dict[str, Any]:
     return {"ok": True, "service": "mdt-hub", "db": str(DB_PATH)}
 
 
+@app.get("/")
+def index_page() -> FileResponse:
+    if not FRONTEND_PATH.exists():
+        raise HTTPException(status_code=404, detail="frontend.html not found")
+    return FileResponse(FRONTEND_PATH)
+
+
 @app.get("/frontend.html")
 def frontend_page() -> FileResponse:
-    frontend = BASE_DIR.parent / "frontend.html"
-    if not frontend.exists():
+    if not FRONTEND_PATH.exists():
         raise HTTPException(status_code=404, detail="frontend.html not found")
-    return FileResponse(frontend)
+    return FileResponse(FRONTEND_PATH)
 
 
 @app.get("/healthz")
