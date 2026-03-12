@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MDT Event",
+  "type": "object",
+  "required": ["case_id", "round_no", "event_type", "speaker", "payload", "timestamp"],
+  "properties": {
+    "case_id": { "type": "string" },
+    "round_no": { "type": "integer", "minimum": 0 },
+    "event_type": {
+      "type": "string",
+      "enum": ["case_opened", "agent_opinion", "conflict_detected", "consensus_updated", "escalation", "case_closed"]
+    },
+    "speaker": { "type": "string" },
+    "specialty": { "type": ["string", "null"] },
+    "payload": { "type": "object" },
+    "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "reply_to_event_id": { "type": ["string", "null"] },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}
