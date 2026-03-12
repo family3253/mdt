@@ -986,6 +986,7 @@
     async function retryLoadModels() {
       try {
         await loadAvailableModels();
+        await loadAgents();
         statusEl.textContent = '模型列表加载成功';
       } catch (e) {
         statusEl.textContent = toErrorMessage(e, '加载模型列表失败');
@@ -1015,11 +1016,16 @@
         statusEl.textContent = '已使用同源 API/WS；如反代路径特殊可加 ?api=http://host:port 覆盖';
       }
 
-      // 数据初始化并行执行，任一失败不影响主界面可用性
-      Promise.allSettled([loadAvailableModels(), loadAgents()]).then((results) => {
+      // 先加载模型，再渲染 Agent，下拉才能显示完整模型集
+      Promise.allSettled([loadAvailableModels()]).then(async (results) => {
         const failed = results.filter(r => r.status === 'rejected').length;
+        try {
+          await loadAgents();
+        } catch (_) {
+          // 错误由 loadAgents 内部提示
+        }
         if (failed > 0) {
-          statusEl.textContent = `初始化完成（${failed}项加载失败，可手动重试）`;
+          statusEl.textContent = `初始化完成（模型列表加载失败，可手动重试）`;
         }
       });
     }
