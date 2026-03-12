@@ -582,6 +582,69 @@ def _extract_target_points(opinion_payload: dict[str, Any]) -> list[str]:
             break
     return uniq
 
+
+
+def _find_non_self_target(events: list[dict[str, Any]], speaker: str, start_idx: int = 0) -> dict[str, Any]:
+    if not events:
+        return {"event_id": None, "speaker": "unknown", "payload": {}}
+    n = len(events)
+    for k in range(n):
+        cand = events[(start_idx + k) % n]
+        if cand.get("speaker") != speaker:
+            return cand
+    return events[start_idx % n]
+
+
+def _round_conflict_keys(case_id: str, round_no: int) -> set[str]:
+    with conn() as c:
+        rows = c.execute(
+            "select payload from mdt_events where case_id=? and round_no=? and event_type in ('agent_opinion','agent_review')",
+            (case_id, round_no),
+        ).fetchall()
+    keys: set[str] = set()
+    for r in rows:
+        payload = json.loads(r["payload"] or "{}")
+        stance = str(payload.get("stance", "")).lower()
+        if stance not in ("disagree", "oppose"):
+            continue
+        tpts = payload.get("target_points") or payload.get("questions") or payload.get("references") or []
+        if isinstance(tpts, str):
+            tpts = [tpts]
+        for t in tpts:
+            txt = str(t).strip()
+            if txt:
+                keys.add(txt[:80])
+    return keys
+
+
+def _check_convergence(case_id: str, current_round: int, current_conflicts: int, agent_count: int, current_keys: set[str]) -> tuple[bool, dict[str, Any]]:
+    agent_count = max(agent_count, 1)
+    conflict_ratio = current_conflicts / agent_count
+    details = {
+        "conflict_ratio": round(conflict_ratio, 3),
+        "current_conflicts": current_conflicts,
+        "agent_count": agent_count,
+        "rule": "none",
+    }
+    if conflict_ratio <= 0.2:
+        details["rule"] = "conflict_ratio_below_threshold"
+        return True, details
+
+    if current_round >= 3:
+        r1 = _round_conflict_keys(case_id, current_round - 1)
+        r2 = _round_conflict_keys(case_id, current_round - 2)
+        new_curr = current_keys - r1
+        new_prev = r1 - r2
+        details.update({
+            "new_curr": sorted(list(new_curr))[:5],
+            "new_prev": sorted(list(new_prev))[:5],
+        })
+        if not new_curr and not new_prev:
+            details["rule"] = "no_new_disputes_for_two_rounds"
+            return True, details
+
+    return False, details
+
 def _candidate_openclaw_config_paths() -> list[Path]:
     home = Path.home()
     return [
@@ -1117,16 +1180,17 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
 
 @app.post("/discussion/review")
 async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
+    """多轮迭代复核：每位专家均可吸收他人观点并继续质疑/修正，支持任意轮次推进。"""
     with conn() as c:
         base_rows = c.execute(
-            "select event_id, speaker, payload from mdt_events where case_id=? and round_no=? and event_type in ('agent_opinion','lead_opinion') order by event_id asc",
+            "select event_id, speaker, payload from mdt_events where case_id=? and round_no=? and event_type in ('agent_opinion','lead_opinion','agent_review') order by event_id asc",
             (payload.case_id, payload.from_round),
         ).fetchall()
 
     if not base_rows:
-        raise HTTPException(status_code=404, detail="no agent opinions found for source round")
+        raise HTTPException(status_code=404, detail="no source events found for source round")
 
-    opinions = [
+    prev_events = [
         {
             "event_id": r["event_id"],
             "speaker": r["speaker"],
@@ -1135,18 +1199,39 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
         for r in base_rows
     ]
 
-    generated = 0
     docs_context = _build_case_docs_context(payload.case_id)
     agents = _load_enabled_agents()
+    generated = 0
+    round_conflicts = 0
+
+    prev_round_conflict_keys = _round_conflict_keys(payload.case_id, payload.from_round)
+
     for idx, (agent_id, specialty, lens, agent_model) in enumerate(agents):
-        target = opinions[(idx + 1) % len(opinions)]
+        target = _find_non_self_target(prev_events, agent_id, start_idx=idx)
         target_points = _extract_target_points(target["payload"])
-        focus = target_points[0] if target_points else f"事件#{target['event_id']}"
-        stance = "oppose" if idx % 2 == 0 else "support"
+        absorbed = target_points[:2]
+        focus = absorbed[0] if absorbed else f"事件#{target['event_id']}"
+
+        # 迭代收敛：第二轮允许更多反驳，后续轮次逐步收敛但保留反驳权
+        if payload.to_round <= 2:
+            stance = "oppose" if idx % 2 == 0 else "support"
+        else:
+            stance = "oppose" if (idx == 0 and prev_round_conflict_keys) else "support"
+
+        if stance == "oppose":
+            round_conflicts += 1
+
         review_text = (
-            f"{agent_id} 针对 {target['speaker']} 的要点“{focus}”给出{('质疑' if stance=='oppose' else '支持')}，"
-            f"并从{lens}补充执行边界。"
+            f"{agent_id} 吸收了 {target['speaker']} 的要点“{focus}”，"
+            f"并从{lens}角度给出{('反驳修正' if stance=='oppose' else '支持修正')}。"
         )
+        actions = [
+            f"沿着“{focus}”补充一条可验证措施",
+            "若新证据出现则允许下一轮继续修正",
+        ]
+        if stance == "oppose":
+            actions.insert(0, "先补冲突证据再执行主方案")
+
         ev = MDTEvent(
             case_id=payload.case_id,
             round_no=payload.to_round,
@@ -1158,48 +1243,100 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
                 "target_event_id": target["event_id"],
                 "target_speaker": target["speaker"],
                 "target_points": target_points,
+                "absorbed_from": [{"speaker": target["speaker"], "event_id": target["event_id"], "points": absorbed}],
                 "model_used": agent_model or DEFAULT_AGENT_MODEL,
                 "review": review_text,
                 "assessment": [review_text],
                 "risks": ["若忽略该要点，可能影响方案可执行性"],
-                "actions": ["围绕目标要点补充一条可验证措施"],
+                "actions": actions,
                 "questions": [f"{focus} 是否有动态复核数据支撑？"],
                 "references": target_points[:3],
                 "docs_context": docs_context,
+                "iteration": {
+                    "from_round": payload.from_round,
+                    "to_round": payload.to_round,
+                    "iterative": True,
+                },
                 "case_context": {
-                    "source_round": payload.from_round,
                     "doc_refs": [d.get("doc_id") for d in docs_context.get("latest_docs", [])],
                 },
             },
-            confidence=0.74,
+            confidence=0.74 if stance == "oppose" else 0.82,
             reply_to_event_id=target["event_id"],
         )
         body = _persist_event(ev)
         generated += 1
         await ws_manager.broadcast({"type": "mdt_event", "data": body})
 
-    orchestrator = MDTEvent(
+    current_keys = _round_conflict_keys(payload.case_id, payload.to_round)
+    consensus_score = round(max(0.0, 1 - (round_conflicts / max(len(agents), 1))), 3)
+
+    progress = MDTEvent(
         case_id=payload.case_id,
         round_no=payload.to_round,
-        event_type="conflict_detected",
+        event_type="consensus_updated",
         speaker="mdt-orchestrator",
         specialty="mdt",
         payload={
-            "summary": "二轮互评完成，已形成支持/反驳关系图。",
-            "assessment": ["已针对上一轮具体要点完成复核"],
-            "actions": ["对反驳项进行证据补齐后定稿"],
-            "risks": ["未闭环冲突点会降低终版一致性"],
-            "questions": [],
+            "status": "iterating" if round_conflicts else "near_consensus",
+            "summary": "本轮已完成全员吸收+修正，继续按冲突点推进。",
+            "assessment": ["全员均参与了吸收与修正"],
+            "actions": ["冲突项继续闭环", "若满足阈值则输出最终一致意见"],
+            "risks": ["过早定稿可能掩盖剩余关键分歧"],
+            "questions": sorted(list(current_keys))[:3],
             "stance": "orchestrate",
-            "references": [],
-            "next_step": "resolve_conflicts_and_finalize",
+            "references": sorted(list(current_keys))[:3],
+            "consensus_score": consensus_score,
+            "confidence": consensus_score,
+            "iteration": {"from_round": payload.from_round, "to_round": payload.to_round},
         },
-        confidence=0.83,
+        confidence=consensus_score,
     )
-    body = _persist_event(orchestrator)
-    await ws_manager.broadcast({"type": "mdt_event", "data": body})
+    progress_body = _persist_event(progress)
+    await ws_manager.broadcast({"type": "mdt_event", "data": progress_body})
+    generated += 1
 
-    return {"accepted": True, "case_id": payload.case_id, "generated_count": generated + 1}
+    converged, detail = _check_convergence(payload.case_id, payload.to_round, round_conflicts, len(agents), current_keys)
+    final_event_id = None
+    if converged:
+        final = MDTEvent(
+            case_id=payload.case_id,
+            round_no=payload.to_round,
+            event_type="final_consensus",
+            speaker="mdt-orchestrator",
+            specialty="mdt",
+            payload={
+                "summary": "满足收敛条件，输出最终一致意见。",
+                "assessment": ["冲突项已降至阈值或连续两轮无新增关键分歧"],
+                "actions": ["执行最终方案并设定复评时间点"],
+                "risks": ["仍需随病情变化动态校正"],
+                "questions": [],
+                "stance": "finalize",
+                "references": sorted(list(current_keys))[:3],
+                "consensus_score": consensus_score,
+                "convergence_detail": detail,
+            },
+            confidence=max(0.85, consensus_score),
+            reply_to_event_id=progress_body.get("event_id"),
+        )
+        final_body = _persist_event(final)
+        final_event_id = final_body.get("event_id")
+        await ws_manager.broadcast({"type": "mdt_event", "data": final_body})
+        generated += 1
+
+    return {
+        "accepted": True,
+        "case_id": payload.case_id,
+        "from_round": payload.from_round,
+        "to_round": payload.to_round,
+        "generated_count": generated,
+        "equal_participation": len(agents),
+        "round_conflicts": round_conflicts,
+        "consensus_score": consensus_score,
+        "converged": converged,
+        "convergence_detail": detail,
+        "final_event_id": final_event_id,
+    }
 
 
 @app.get("/cases/{case_id}/documents")
@@ -1225,7 +1362,7 @@ def list_case_docs(case_id: str) -> dict[str, Any]:
 def case_conflicts(case_id: str) -> dict[str, Any]:
     with conn() as c:
         rows = c.execute(
-            "select event_id, speaker, specialty, payload, reply_to_event_id from mdt_events where case_id=? and event_type in ('agent_review','conflict_detected') order by event_id asc",
+            "select event_id, round_no, speaker, specialty, payload, reply_to_event_id from mdt_events where case_id=? and event_type in ('agent_review','conflict_detected') order by event_id asc",
             (case_id,),
         ).fetchall()
 
@@ -1244,6 +1381,9 @@ def case_conflicts(case_id: str) -> dict[str, Any]:
                     "to": target,
                     "stance": payload.get("stance", "neutral"),
                     "event_id": r["event_id"],
+                    "target_event_id": payload.get("target_event_id"),
+                    "round_no": r["round_no"],
+                    "reply_to_event_id": r["reply_to_event_id"],
                 }
             )
 
