@@ -29,6 +29,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "mdt.db"
 
 app = FastAPI(title="MDT Hub API", version="0.3.0")
+DEFAULT_AGENT_MODEL = "openai-codex/gpt-5.3-codex"
 
 
 class MDTEvent(BaseModel):
@@ -93,6 +94,12 @@ class AgentCreate(BaseModel):
     prompt: str = ""
     enabled: bool = True
     auto_learn_web: bool = True
+    model: Optional[str] = None
+
+
+class AgentModelUpdate(BaseModel):
+    model: Optional[str] = None
+    enabled: Optional[bool] = None
 
 
 class WSManager:
@@ -153,6 +160,13 @@ def conn() -> sqlite3.Connection:
     return c
 
 
+def _ensure_column(c: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    cols = c.execute(f"pragma table_info({table})").fetchall()
+    names = {r[1] for r in cols}
+    if column not in names:
+        c.execute(f"alter table {table} add column {column} {ddl}")
+
+
 def init_db() -> None:
     with conn() as c:
         c.execute(
@@ -191,6 +205,7 @@ def init_db() -> None:
               role text not null,
               specialty text not null,
               prompt text,
+              model text,
               enabled integer not null default 1,
               created_at text not null
             )
@@ -221,6 +236,12 @@ def init_db() -> None:
             )
             """
         )
+        _ensure_column(c, "mdt_agents", "model", "text")
+
+        # 兼容旧库：若历史表缺少 model 列则在线补齐
+        cols = [r[1] for r in c.execute("pragma table_info(mdt_agents)").fetchall()]
+        if "model" not in cols:
+            c.execute("alter table mdt_agents add column model text")
 
 
 def _ensure_case(case_id: str) -> None:
@@ -268,17 +289,17 @@ def _seed_default_agents() -> None:
     with conn() as c:
         for agent_id, specialty, lens in DEFAULT_SPECIALIST_PROFILES:
             c.execute(
-                "insert or ignore into mdt_agents(agent_id, role, specialty, prompt, enabled, created_at) values (?,?,?,?,1,?)",
-                (agent_id, lens, specialty, "", now),
+                "insert or ignore into mdt_agents(agent_id, role, specialty, prompt, model, enabled, created_at) values (?,?,?,?,?,1,?)",
+                (agent_id, lens, specialty, "", None, now),
             )
 
 
-def _load_enabled_agents() -> list[tuple[str, str, str]]:
+def _load_enabled_agents() -> list[tuple[str, str, str, Optional[str]]]:
     with conn() as c:
-        rows = c.execute("select agent_id, specialty, role from mdt_agents where enabled=1 order by created_at asc").fetchall()
+        rows = c.execute("select agent_id, specialty, role, model from mdt_agents where enabled=1 order by created_at asc").fetchall()
     if not rows:
-        return DEFAULT_SPECIALIST_PROFILES
-    return [(r["agent_id"], r["specialty"], r["role"]) for r in rows]
+        return [(a, b, c, None) for (a, b, c) in DEFAULT_SPECIALIST_PROFILES]
+    return [(r["agent_id"], r["specialty"], r["role"], r["model"]) for r in rows]
 
 
 def _knowledge_snippet(agent_id: str, limit: int = 2) -> str:
@@ -420,7 +441,7 @@ async def ingest_event(event: MDTEvent) -> dict[str, Any]:
 @app.get("/agents")
 def list_agents() -> dict[str, Any]:
     with conn() as c:
-        rows = c.execute("select agent_id, role, specialty, prompt, enabled, created_at from mdt_agents order by created_at asc").fetchall()
+        rows = c.execute("select agent_id, role, specialty, prompt, model, enabled, created_at from mdt_agents order by created_at asc").fetchall()
     return {"count": len(rows), "agents": [dict(r) for r in rows]}
 
 
@@ -430,12 +451,13 @@ def create_agent(payload: AgentCreate) -> dict[str, Any]:
     auto_prompt = _auto_prompt_for_role(payload.role, payload.specialty)
     final_prompt = (auto_prompt + "\n" + payload.prompt).strip() if payload.prompt else auto_prompt
     skill_suggestions = _skills_for_role(payload.role, payload.specialty)
+    model = (payload.model or "").strip() or None
 
     with conn() as c:
         try:
             c.execute(
-                "insert into mdt_agents(agent_id, role, specialty, prompt, enabled, created_at) values (?,?,?,?,?,?)",
-                (payload.agent_id, payload.role, payload.specialty, final_prompt, 1 if payload.enabled else 0, now),
+                "insert into mdt_agents(agent_id, role, specialty, prompt, model, enabled, created_at) values (?,?,?,?,?,?,?)",
+                (payload.agent_id, payload.role, payload.specialty, final_prompt, model, 1 if payload.enabled else 0, now),
             )
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="agent_id already exists")
@@ -444,9 +466,20 @@ def create_agent(payload: AgentCreate) -> dict[str, Any]:
         "agent_id": payload.agent_id,
         "generated_prompt": auto_prompt,
         "final_prompt": final_prompt,
+        "model": model,
         "skill_suggestions": skill_suggestions,
         "web_learning": "enabled" if payload.auto_learn_web else "disabled",
     }
+
+
+@app.post("/agents/{agent_id}/model")
+def update_agent_model(agent_id: str, payload: AgentModelUpdate) -> dict[str, Any]:
+    model = (payload.model or "").strip() or None
+    with conn() as c:
+        cur = c.execute("update mdt_agents set model=? where agent_id=?", (model, agent_id))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="agent not found")
+    return {"ok": True, "agent_id": agent_id, "model": model}
 
 
 @app.post("/agents/{agent_id}/knowledge")
@@ -534,8 +567,9 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
     await ws_manager.broadcast({"type": "mdt_event", "data": human_body})
 
     generated: list[dict[str, Any]] = []
-    for agent_id, specialty, lens in _load_enabled_agents():
+    for agent_id, specialty, lens, agent_model in _load_enabled_agents():
         learned = _knowledge_snippet(agent_id)
+        model_used = agent_model or DEFAULT_AGENT_MODEL
         discussion_text = f"针对输入“{payload.message}”，从{lens}角度建议补充评估并形成可执行方案。"
         if adopted_lines:
             discussion_text += " 已采纳病历要点：" + "；".join(adopted_lines[:3])
@@ -550,6 +584,7 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
                 "discussion": discussion_text,
                 "learned_context": learned,
                 "source": "simulated_role_response",
+                "model_used": model_used,
                 "confirmed_sections": confirmed_sections,
             },
             confidence=0.75,
@@ -606,7 +641,7 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
 
     generated = 0
     agents = _load_enabled_agents()
-    for idx, (agent_id, specialty, lens) in enumerate(agents):
+    for idx, (agent_id, specialty, lens, agent_model) in enumerate(agents):
         target = opinions[(idx + 1) % len(opinions)]
         stance = "oppose" if idx % 2 == 0 else "support"
         ev = MDTEvent(
@@ -619,6 +654,7 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
                 "stance": stance,
                 "target_event_id": target["event_id"],
                 "target_speaker": target["speaker"],
+                "model_used": agent_model or DEFAULT_AGENT_MODEL,
                 "review": f"{agent_id} 对 {target['speaker']} 的观点给出{('反驳' if stance=='oppose' else '支持')}：从{lens}角度补充证据与边界。",
             },
             confidence=0.74,
