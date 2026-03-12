@@ -11,8 +11,8 @@
     "feishu",
     "wecom"
   ],
-  "lastGlobalHeartbeatCheckAt": "2026-03-13T03:25:00+08:00",
-  "lastGlobalHeartbeatCheckResult": "openclaw status healthy: gateway reachable (~32ms), all enabled channel states OK (excluding Telegram scope rule), no gateway/delivery/announce timeout signals, and active session token usage below 75% (main 14%); no auto-fix needed.",
+  "lastGlobalHeartbeatCheckAt": "2026-03-13T03:55:00+08:00",
+  "lastGlobalHeartbeatCheckResult": "openclaw status healthy: gateway reachable (~32ms), enabled non-Telegram channel states OK (Discord/QQBot/Feishu/WeCom), no gateway/delivery/announce timeout signals, and observed session token usage below 75%.",
   "lastGlobalHeartbeatCheckChannels": [
     "webchat",
     "discord",
