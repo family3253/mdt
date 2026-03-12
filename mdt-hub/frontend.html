@@ -291,6 +291,7 @@
     let defaultModel = 'openai-codex/gpt-5.3-codex';
     let pingTimer = null;
     let pollTimer = null;
+    let wsConnectTimeout = null;
     const seenEventIds = new Set();
 
     const AGENT_PERSONA = {
@@ -526,7 +527,18 @@
       wsState.style.background = 'rgba(243,156,18,.2)';
       ws = new WebSocket(WS_URL);
 
+      if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
+      wsConnectTimeout = setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.CONNECTING) {
+          wsState.textContent = 'WebSocket 连接超时（切轮询）';
+          wsState.style.background = 'rgba(255,95,109,.2)';
+          startPollingFallback();
+          try { ws.close(); } catch (_) {}
+        }
+      }, 3000);
+
       ws.onopen = async () => {
+        if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
         wsState.textContent = 'WebSocket 已连接';
         wsState.style.background = 'rgba(46,204,113,.2)';
         stopPollingFallback();
@@ -538,12 +550,14 @@
       };
 
       ws.onerror = () => {
+        if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
         wsState.textContent = 'WebSocket 异常（切轮询）';
         wsState.style.background = 'rgba(255,95,109,.2)';
         startPollingFallback();
       };
 
       ws.onclose = () => {
+        if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
         wsState.textContent = 'WebSocket 断开（轮询模式）';
         wsState.style.background = 'rgba(255,95,109,.2)';
         clearPing();
