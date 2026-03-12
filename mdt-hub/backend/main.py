@@ -505,6 +505,83 @@ def _build_case_docs_context(case_id: str, limit: int = 3) -> dict[str, Any]:
     }
 
 
+
+
+def _collect_case_fragments(confirmed_sections: Optional[ConfirmedSections], docs_context: dict[str, Any], limit: int = 6) -> list[str]:
+    fragments: list[str] = []
+    if confirmed_sections:
+        for key in ("imaging", "labs", "medications"):
+            for item in getattr(confirmed_sections, key, []):
+                txt = (item.text or "").strip()
+                if item.confirmed and txt:
+                    fragments.append(f"[{key}] {txt}")
+    merged = docs_context.get("merged_sections") or {}
+    for key in ("imaging", "labs", "medications"):
+        for txt in (merged.get(key) or []):
+            t = str(txt).strip()
+            if t:
+                fragments.append(f"[{key}] {t}")
+    out = []
+    seen = set()
+    for f in fragments:
+        if f in seen:
+            continue
+        seen.add(f)
+        out.append(f)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _choose_lead_expert(message: str, confirmed_sections: Optional[ConfirmedSections], enabled_agents: list[tuple[str, str, str, Optional[str]]]) -> str:
+    text = (message or "").lower()
+    if any(k in text for k in ["低血压", "休克", "shock", "升压", "脓毒"]):
+        pref = "mdt-icu"
+    elif any(k in text for k in ["肌酐", "egfr", "aki", "剂量", "药物", "tdm"]):
+        pref = "mdt-pharm"
+    elif any(k in text for k in ["培养", "病原", "耐药", "mec", "kpc", "vitek"]):
+        pref = "mdt-micro"
+    else:
+        pref = "mdt-id"
+
+    agent_ids = [a[0] for a in enabled_agents]
+    if pref in agent_ids:
+        return pref
+    return "mdt-id" if "mdt-id" in agent_ids else (agent_ids[0] if agent_ids else "mdt-id")
+
+
+def _extract_key_points(message: str, case_fragments: list[str], limit: int = 3) -> list[str]:
+    seeds = [x.strip() for x in re.split(r"[，。；;,.\n]", message or "") if x.strip()]
+    points = seeds[:2]
+    for f in case_fragments:
+        if len(points) >= limit:
+            break
+        points.append(f)
+    return points[:limit]
+
+
+def _extract_target_points(opinion_payload: dict[str, Any]) -> list[str]:
+    points: list[str] = []
+    for k in ("assessment", "actions", "questions", "risks"):
+        v = opinion_payload.get(k)
+        if isinstance(v, list):
+            points.extend([str(x).strip() for x in v if str(x).strip()])
+        elif isinstance(v, str) and v.strip():
+            points.append(v.strip())
+    discussion = str(opinion_payload.get("discussion") or "").strip()
+    if discussion and not points:
+        points.append(discussion)
+    uniq = []
+    seen = set()
+    for p in points:
+        if p in seen:
+            continue
+        seen.add(p)
+        uniq.append(p)
+        if len(uniq) >= 4:
+            break
+    return uniq
+
 def _candidate_openclaw_config_paths() -> list[Path]:
     home = Path.home()
     return [
@@ -847,7 +924,7 @@ async def ingest_case_doc_upload(case_id: str, file: UploadFile = File(...)) -> 
 
 @app.post("/discussion/submit")
 async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
-    """模拟现实 MDT：先录入临床医生发言，再按角色生成一轮专家回应。"""
+    """模拟现实 MDT：临床介绍 -> 牵头专家 -> 多学科吸收/质疑 -> 定向追问 -> 共识更新。"""
     round_no = payload.round_no or max(1, _latest_round(payload.case_id))
 
     confirmed_sections = payload.confirmed_sections.model_dump(mode="json") if payload.confirmed_sections else None
@@ -858,14 +935,18 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
         "latest_docs": [],
         "merged_sections": {"imaging": [], "labs": [], "medications": []},
     }
-    adopted_lines: list[str] = []
-    if payload.confirmed_sections:
-        for k in ("imaging", "labs", "medications"):
-            for item in getattr(payload.confirmed_sections, k):
-                if item.confirmed and item.text.strip():
-                    adopted_lines.append(f"[{k}] {item.text.strip()}")
+    case_fragments = _collect_case_fragments(payload.confirmed_sections, docs_context)
 
-    human_payload: dict[str, Any] = {"text": payload.message, "docs_context": docs_context}
+    human_payload: dict[str, Any] = {
+        "text": payload.message,
+        "assessment": [payload.message],
+        "actions": [],
+        "risks": [],
+        "questions": [],
+        "stance": "clinical_question",
+        "references": case_fragments[:3],
+        "docs_context": docs_context,
+    }
     if confirmed_sections:
         human_payload["confirmed_sections"] = confirmed_sections
 
@@ -881,41 +962,119 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
     human_body = _persist_event(human_event)
     await ws_manager.broadcast({"type": "mdt_event", "data": human_body})
 
-    generated: list[dict[str, Any]] = []
-    for agent_id, specialty, lens, agent_model in _load_enabled_agents():
-        learned = _knowledge_snippet(agent_id)
-        model_used = agent_model or DEFAULT_AGENT_MODEL
-        discussion_text = f"针对输入“{payload.message}”，从{lens}角度建议补充评估并形成可执行方案。"
-        if adopted_lines:
-            discussion_text += " 已采纳病历要点：" + "；".join(adopted_lines[:3])
-        if docs_context.get("doc_count"):
-            discussion_text += f" 参考了{docs_context.get('doc_count')}份病历文档。"
+    agents = _load_enabled_agents()
+    lead_id = _choose_lead_expert(payload.message, payload.confirmed_sections, agents)
+    lead_points = _extract_key_points(payload.message, case_fragments)
 
+    generated: list[dict[str, Any]] = []
+    disagreements: list[str] = []
+
+    lead_agent = next(((a, s, l, m) for (a, s, l, m) in agents if a == lead_id), None)
+    if lead_agent:
+        a, specialty, lens, model = lead_agent
+        lead_payload = {
+            "assessment": [f"牵头判断：{lead_points[0] if lead_points else payload.message}", f"核心路径：{lens}"],
+            "risks": ["需警惕进展性器官功能恶化", "需覆盖耐药风险但避免过度治疗"],
+            "actions": ["先完成感染源与病原学再评估覆盖", "24小时内按病情变化复盘"],
+            "questions": ["是否存在必须立即调整的器官支持策略？"],
+            "stance": "lead",
+            "references": lead_points,
+            "discussion": f"由{a}牵头：先围绕{lead_points[0] if lead_points else '临床主诉'}建立初始方案，再收敛分歧。",
+            "lead_key_points": lead_points,
+            "model_used": model or DEFAULT_AGENT_MODEL,
+            "docs_context": docs_context,
+            "confirmed_sections": confirmed_sections,
+        }
+        ev = MDTEvent(
+            case_id=payload.case_id,
+            round_no=round_no,
+            event_type="lead_opinion",
+            speaker=a,
+            specialty=specialty,
+            payload=lead_payload,
+            confidence=0.78,
+        )
+        body = _persist_event(ev)
+        generated.append(body)
+        await ws_manager.broadcast({"type": "mdt_event", "data": body})
+
+    non_leads = [(a, s, l, m) for (a, s, l, m) in agents if a != lead_id]
+    force_disagree_assigned = False
+    for idx, (agent_id, specialty, lens, agent_model) in enumerate(non_leads):
+        should_disagree = (not force_disagree_assigned and idx == 0) or ("micro" in specialty and "耐药" in payload.message)
+        stance = "disagree" if should_disagree else "agree"
+        if should_disagree:
+            force_disagree_assigned = True
+
+        reason = (
+            f"同意牵头点“{lead_points[0] if lead_points else payload.message}”，但需补充{lens}执行细节。"
+            if stance == "agree"
+            else f"对牵头点“{lead_points[0] if lead_points else payload.message}”存在异议：当前证据不足以直接定案。"
+        )
+        action = (
+            "按牵头方案执行并加做本专科监测项。"
+            if stance == "agree"
+            else "先补关键证据（培养/药敏/动态指标）后再定最终方案。"
+        )
+        refs = [lead_points[0] if lead_points else payload.message] + case_fragments[:2]
+        if stance == "disagree":
+            disagreements.append(f"{agent_id}: {reason}")
+
+        opinion_payload = {
+            "assessment": [reason],
+            "risks": ["若证据不足直接推进，可能导致覆盖失衡或时机延误"],
+            "actions": [action],
+            "questions": ["若关键检查结果反向，应如何调整？"],
+            "stance": stance,
+            "references": refs,
+            "discussion": f"{agent_id} 对牵头观点表态({stance})：{reason} 下一步：{action}",
+            "lead_reference": lead_points,
+            "model_used": agent_model or DEFAULT_AGENT_MODEL,
+            "docs_context": docs_context,
+            "confirmed_sections": confirmed_sections,
+            "case_context": {
+                "message": payload.message,
+                "doc_refs": [d.get("doc_id") for d in docs_context.get("latest_docs", [])],
+            },
+        }
         ev = MDTEvent(
             case_id=payload.case_id,
             round_no=round_no,
             event_type="agent_opinion",
             speaker=agent_id,
             specialty=specialty,
-            payload={
-                "discussion": discussion_text,
-                "learned_context": learned,
-                "source": "simulated_role_response",
-                "model_used": model_used,
-                "confirmed_sections": confirmed_sections,
-                "docs_context": docs_context,
-                "case_context": {
-                    "message": payload.message,
-                    "adopted_confirmed_lines": adopted_lines[:10],
-                    "doc_refs": [d.get("doc_id") for d in docs_context.get("latest_docs", [])],
-                },
-            },
-            confidence=0.75,
+            payload=opinion_payload,
+            confidence=0.72 if stance == "disagree" else 0.8,
         )
         body = _persist_event(ev)
         generated.append(body)
         await ws_manager.broadcast({"type": "mdt_event", "data": body})
 
+    if disagreements:
+        followup = MDTEvent(
+            case_id=payload.case_id,
+            round_no=round_no,
+            event_type="targeted_followup",
+            speaker="mdt-orchestrator",
+            specialty="mdt",
+            payload={
+                "assessment": ["检测到分歧，进入定向追问"],
+                "risks": ["若分歧点不闭环，后续方案不稳定"],
+                "actions": ["逐条回应冲突点并要求可验证依据"],
+                "questions": disagreements,
+                "stance": "orchestrate",
+                "references": lead_points,
+                "summary": "; ".join(disagreements),
+            },
+            confidence=0.76,
+        )
+        followup_body = _persist_event(followup)
+        generated.append(followup_body)
+        await ws_manager.broadcast({"type": "mdt_event", "data": followup_body})
+
+    total_nonlead = max(len(non_leads), 1)
+    disagree_ratio = len(disagreements) / total_nonlead
+    consensus_score = max(0.0, min(1.0, 1 - disagree_ratio))
     orchestrator = MDTEvent(
         case_id=payload.case_id,
         round_no=round_no,
@@ -923,11 +1082,20 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
         speaker="mdt-orchestrator",
         specialty="mdt",
         payload={
-            "status": "majority",
-            "summary": "已收集多学科观点，建议进入下一轮定向追问或定稿。",
+            "status": "partial_consensus" if disagreements else "majority",
+            "summary": "已完成牵头-吸收-质疑流程，形成阶段共识。",
             "next_step": "targeted_round_or_finalize",
+            "assessment": ["本轮可执行主线已明确"],
+            "risks": ["仍需关注分歧项是否被证据消解"],
+            "actions": ["将分歧点带入下一轮复核", "根据关键指标更新最终方案"],
+            "questions": disagreements[:3],
+            "stance": "orchestrate",
+            "references": lead_points,
+            "consensus_score": round(consensus_score, 3),
+            "confidence": round(consensus_score, 3),
+            "disagree_count": len(disagreements),
         },
-        confidence=0.82,
+        confidence=round(consensus_score, 3),
     )
     orchestrator_body = _persist_event(orchestrator)
     await ws_manager.broadcast({"type": "mdt_event", "data": orchestrator_body})
@@ -937,8 +1105,10 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
         "case_id": payload.case_id,
         "round_no": round_no,
         "generated_count": len(generated) + 1,
+        "lead_expert": lead_id,
+        "disagree_count": len(disagreements),
+        "consensus_score": round(consensus_score, 3),
         "confirmed_sections_received": bool(confirmed_sections),
-        "confirmed_adopted_count": len(adopted_lines),
         "docs_context_enabled": payload.enable_docs_context,
         "docs_context_doc_count": docs_context.get("doc_count", 0),
         "docs_context_has_image_doc": docs_context.get("has_image_doc", False),
@@ -949,7 +1119,7 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
 async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
     with conn() as c:
         base_rows = c.execute(
-            "select event_id, speaker, payload from mdt_events where case_id=? and round_no=? and event_type='agent_opinion' order by event_id asc",
+            "select event_id, speaker, payload from mdt_events where case_id=? and round_no=? and event_type in ('agent_opinion','lead_opinion') order by event_id asc",
             (payload.case_id, payload.from_round),
         ).fetchall()
 
@@ -970,7 +1140,13 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
     agents = _load_enabled_agents()
     for idx, (agent_id, specialty, lens, agent_model) in enumerate(agents):
         target = opinions[(idx + 1) % len(opinions)]
+        target_points = _extract_target_points(target["payload"])
+        focus = target_points[0] if target_points else f"事件#{target['event_id']}"
         stance = "oppose" if idx % 2 == 0 else "support"
+        review_text = (
+            f"{agent_id} 针对 {target['speaker']} 的要点“{focus}”给出{('质疑' if stance=='oppose' else '支持')}，"
+            f"并从{lens}补充执行边界。"
+        )
         ev = MDTEvent(
             case_id=payload.case_id,
             round_no=payload.to_round,
@@ -981,8 +1157,14 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
                 "stance": stance,
                 "target_event_id": target["event_id"],
                 "target_speaker": target["speaker"],
+                "target_points": target_points,
                 "model_used": agent_model or DEFAULT_AGENT_MODEL,
-                "review": f"{agent_id} 对 {target['speaker']} 的观点给出{('反驳' if stance=='oppose' else '支持')}：从{lens}角度补充证据与边界。",
+                "review": review_text,
+                "assessment": [review_text],
+                "risks": ["若忽略该要点，可能影响方案可执行性"],
+                "actions": ["围绕目标要点补充一条可验证措施"],
+                "questions": [f"{focus} 是否有动态复核数据支撑？"],
+                "references": target_points[:3],
                 "docs_context": docs_context,
                 "case_context": {
                     "source_round": payload.from_round,
@@ -1004,6 +1186,12 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
         specialty="mdt",
         payload={
             "summary": "二轮互评完成，已形成支持/反驳关系图。",
+            "assessment": ["已针对上一轮具体要点完成复核"],
+            "actions": ["对反驳项进行证据补齐后定稿"],
+            "risks": ["未闭环冲突点会降低终版一致性"],
+            "questions": [],
+            "stance": "orchestrate",
+            "references": [],
             "next_step": "resolve_conflicts_and_finalize",
         },
         confidence=0.83,

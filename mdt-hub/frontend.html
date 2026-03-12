@@ -404,7 +404,7 @@
         conflictFail: '加载冲突图失败',
         modelsLoadOk: '模型列表加载成功', modelsLoadFail: '加载模型列表失败', agentsLoadOk: 'Agent 列表加载成功', agentsLoadFail: '加载 Agent 列表失败',
         wsInit: '初始化中（WebSocket 优先）', wsInitHint: '已使用同源 API/WS；如反代路径特殊可加 ?api=http://host:port 覆盖', initDonePartial: '初始化完成（模型列表加载失败，可手动重试）',
-        wsConnectingState: 'WebSocket 连接中...', wsOpen: 'WebSocket 已连接（实时）', wsHandshakeTimeout: 'WebSocket 握手超时（降级轮询）', wsError: 'WebSocket 异常（降级轮询）', wsClosedFmt: 'WebSocket 断开（{reason}，降级轮询）',
+        wsConnectingState: 'WebSocket 连接中...', wsOpen: 'WebSocket 已连接（实时）', wsHandshakeTimeout: 'WebSocket 握手超时（降级轮询）', wsError: 'WebSocket 异常（降级轮询）', wsClosedFmt: 'WebSocket 断开（{reason}，降级轮询）', speakerEmpty: '暂无当前病例专家发言 / No speaker data for current case', consensusEmpty: '暂无共识曲线数据 / No consensus points for current case', conflictEmpty: '暂无冲突关系数据 / No conflict edges for current case',
       },
       en: {
         pageTitle: 'MDT Consultation Console', headerTitle: 'MDT Console', wsConnecting: 'Connecting...', statusWaiting: 'Waiting for actions',
@@ -441,7 +441,7 @@
         conflictFail: 'Load conflict graph failed',
         modelsLoadOk: 'Model list loaded', modelsLoadFail: 'Model list load failed', agentsLoadOk: 'Agent list loaded', agentsLoadFail: 'Agent list load failed',
         wsInit: 'Initializing (WebSocket preferred)', wsInitHint: 'Using same-origin API/WS; append ?api=http://host:port if reverse-proxy path differs', initDonePartial: 'Initialization done (model list failed, retry manually)',
-        wsConnectingState: 'WebSocket connecting...', wsOpen: 'WebSocket connected (realtime)', wsHandshakeTimeout: 'WebSocket handshake timeout (fallback to polling)', wsError: 'WebSocket error (fallback to polling)', wsClosedFmt: 'WebSocket closed ({reason}, fallback to polling)',
+        wsConnectingState: 'WebSocket connecting...', wsOpen: 'WebSocket connected (realtime)', wsHandshakeTimeout: 'WebSocket handshake timeout (fallback to polling)', wsError: 'WebSocket error (fallback to polling)', wsClosedFmt: 'WebSocket closed ({reason}, fallback to polling)', speakerEmpty: 'No speaker data for current case / 暂无当前病例专家发言', consensusEmpty: 'No consensus points for current case / 暂无共识曲线数据', conflictEmpty: 'No conflict edges for current case / 暂无冲突关系数据',
       }
     };
 
@@ -515,8 +515,7 @@
     const diagWs = document.getElementById('diagWs');
     const diagWsClose = document.getElementById('diagWsClose');
 
-    const speakerCounter = {};
-    const consensusSeries = [];
+    let currentCaseEvents = [];
     const speakerChart = echarts.init(document.getElementById('speakerChart'));
     const consensusChart = echarts.init(document.getElementById('consensusChart'));
     const conflictChart = echarts.init(document.getElementById('conflictChart'));
@@ -764,9 +763,9 @@
       if (!caseId) return;
       document.getElementById('caseId').value = caseId;
       setStatusText(tr('switchedCase', { id: caseId }));
+      clearCaseScopedState();
       await loadLatestParsedSections();
       await loadEventsFallback();
-      await loadConflictGraph();
     }
 
     function updateSeat(ev) {
@@ -786,35 +785,101 @@
       renderRoom();
     }
 
-    function renderCharts() {
+
+    function summarizeEventPayload(payload = {}, eventType = '') {
+      const assessment = Array.isArray(payload.assessment) ? payload.assessment : (payload.assessment ? [payload.assessment] : []);
+      const actions = Array.isArray(payload.actions) ? payload.actions : (payload.actions ? [payload.actions] : []);
+      if (assessment.length || actions.length) {
+        return `${assessment.slice(0, 1).join('；')} ${actions.length ? ('→ ' + actions.slice(0, 1).join('；')) : ''}`.trim();
+      }
+      return String(payload.discussion || payload.review || payload.summary || payload.text || eventType || '').slice(0, 220);
+    }
+
+    function renderTimeline() {
+      timeline.innerHTML = '';
+      const sorted = [...currentCaseEvents].sort((a, b) => (a.event_id || 0) - (b.event_id || 0));
+      sorted.forEach(ev => {
+        const div = document.createElement('div');
+        div.className = 'ev';
+        div.innerHTML = `<b>${ev.event_type}</b> · ${ev.speaker}<div class='muted'>${ev.timestamp} | round=${ev.round_no} | conf=${ev.confidence ?? '-'}</div><div class='muted'>${summarizeEventPayload(ev.payload || {}, ev.event_type)}</div>`;
+        timeline.prepend(div);
+      });
+    }
+
+    function clearCaseScopedState() {
+      currentCaseEvents = [];
+      timeline.innerHTML = '';
+      seenEventIds.clear();
+      seatState.clear();
+      renderRoom();
+      renderCharts();
+    }
+
+    function recomputeAnalytics() {
+      const speakerCounter = {};
+      const consensusSeries = [];
+      const conflictEdges = [];
+      const conflictNodes = new Set();
+
+      currentCaseEvents.forEach(ev => {
+        if (ev.event_type === 'agent_opinion' || ev.event_type === 'agent_review') {
+          speakerCounter[ev.speaker] = (speakerCounter[ev.speaker] || 0) + 1;
+        }
+        if (ev.event_type === 'consensus_updated') {
+          const score = Number(ev?.payload?.consensus_score ?? ev?.payload?.confidence ?? ev?.confidence);
+          if (!Number.isNaN(score)) consensusSeries.push({ t: String(ev.timestamp || '').slice(11, 19), v: score });
+        }
+        if (ev.event_type === 'agent_review') {
+          const stance = String(ev?.payload?.stance || '').toLowerCase();
+          if (stance === 'support' || stance === 'oppose') {
+            const from = ev.speaker;
+            const to = ev?.payload?.target_speaker || 'unknown';
+            conflictNodes.add(from); conflictNodes.add(to);
+            conflictEdges.push({ from, to, stance });
+          }
+        }
+      });
+
       speakerChart.setOption({
         tooltip: {},
         xAxis: { type: 'category', data: Object.keys(speakerCounter), axisLabel: { color: '#b8c8f2' } },
         yAxis: { type: 'value', axisLabel: { color: '#b8c8f2' } },
-        series: [{ type: 'bar', data: Object.values(speakerCounter), itemStyle: { color: '#6ea8fe' } }]
-      });
+        series: [{ type: 'bar', data: Object.values(speakerCounter), itemStyle: { color: '#6ea8fe' } }],
+        graphic: Object.keys(speakerCounter).length ? [] : [{ type: 'text', left: 'center', top: 'middle', style: { text: tr('speakerEmpty'), fill: '#9eabd6', fontSize: 14 } }]
+      }, true);
+
       consensusChart.setOption({
         tooltip: {},
         xAxis: { type: 'category', data: consensusSeries.map(x => x.t), axisLabel: { color: '#b8c8f2' } },
         yAxis: { type: 'value', min: 0, max: 1, axisLabel: { color: '#b8c8f2' } },
-        series: [{ type: 'line', smooth: true, data: consensusSeries.map(x => x.v), lineStyle: { color: '#2ecc71' } }]
-      });
+        series: [{ type: 'line', smooth: true, data: consensusSeries.map(x => x.v), lineStyle: { color: '#2ecc71' } }],
+        graphic: consensusSeries.length ? [] : [{ type: 'text', left: 'center', top: 'middle', style: { text: tr('consensusEmpty'), fill: '#9eabd6', fontSize: 14 } }]
+      }, true);
+
+      const nodes = [...conflictNodes].map((id, i) => ({ id, name: id, value: i, symbolSize: 44 }));
+      const links = conflictEdges.map(e => ({
+        source: e.from,
+        target: e.to,
+        lineStyle: { color: e.stance === 'oppose' ? '#ff5f6d' : '#2ecc71', width: 2 },
+        label: { show: true, formatter: e.stance }
+      }));
+      conflictChart.setOption({
+        tooltip: {},
+        series: [{ type: 'graph', layout: 'force', roam: true, label: { show: true, color: '#dbe6ff' }, data: nodes, links }],
+        graphic: links.length ? [] : [{ type: 'text', left: 'center', top: 'middle', style: { text: tr('conflictEmpty'), fill: '#9eabd6', fontSize: 14 } }]
+      }, true);
     }
 
+    function renderCharts() { recomputeAnalytics(); }
+
     function addEvent(ev) {
-      if (ev && typeof ev.event_id !== 'undefined') {
+      if (!ev || ev.case_id !== document.getElementById('caseId').value.trim()) return;
+      if (typeof ev.event_id !== 'undefined') {
         if (seenEventIds.has(ev.event_id)) return;
         seenEventIds.add(ev.event_id);
       }
-      const div = document.createElement('div');
-      div.className = 'ev';
-      div.innerHTML = `<b>${ev.event_type}</b> · ${ev.speaker}<div class='muted'>${ev.timestamp} | round=${ev.round_no} | conf=${ev.confidence ?? '-'}</div><div class='muted'>${JSON.stringify(ev.payload)}</div>`;
-      timeline.prepend(div);
-
-      speakerCounter[ev.speaker] = (speakerCounter[ev.speaker] || 0) + 1;
-      if (ev.event_type === 'consensus_updated') {
-        consensusSeries.push({ t: ev.timestamp.slice(11,19), v: typeof ev.confidence === 'number' ? ev.confidence : 0.8 });
-      }
+      currentCaseEvents.push(ev);
+      renderTimeline();
       renderCharts();
       updateSeat(ev);
     }
@@ -829,7 +894,12 @@
       if (!caseId) { scheduleNextPoll(); return; }
       try {
         const { data } = await requestWithMeta(`/cases/${caseId}/events`);
-        (data?.events || []).forEach(ev => { if (!seenEventIds.has(ev.event_id)) addEvent(ev); });
+        const events = data?.events || [];
+        currentCaseEvents = [];
+        seenEventIds.clear();
+        events.forEach(ev => { seenEventIds.add(ev.event_id); currentCaseEvents.push(ev); updateSeat(ev); });
+        renderTimeline();
+        renderCharts();
         pollBackoffIndex = 0;
         diagState.pollLastSuccess = Date.now();
       } catch (_) {
@@ -940,6 +1010,7 @@
         const picked = Object.values(confirmedSections).reduce((n, arr) => n + (arr || []).filter(x => x.confirmed).length, 0);
         setStatusText(tr('submitOk', { count: data.generated_count, picked, docsOn: data.docs_context_enabled ? tr('on') : tr('off'), docCount: data.docs_context_doc_count ?? 0 }));
         await refreshRecentCases();
+        await loadEventsFallback();
       } catch (e) {
         setStatusText(toErrorMessage(e, 'submitFail'));
       }
@@ -953,7 +1024,7 @@
           body: JSON.stringify({case_id: caseId, from_round: 1, to_round: 2})
         });
         setStatusText(tr('reviewOk', { count: data.generated_count }));
-        await loadConflictGraph();
+        await loadEventsFallback();
       } catch (e) {
         setStatusText(toErrorMessage(e, 'reviewFail'));
       }
@@ -1131,17 +1202,8 @@
     }
 
     async function loadConflictGraph() {
-      const caseId = document.getElementById('caseId').value.trim();
       try {
-        const { data } = await requestWithMeta(`/cases/${caseId}/conflicts`);
-        const nodes = (data.nodes || []).map((n, i) => ({ id: n.id, name: n.id, value: i, symbolSize: 44 }));
-        const links = (data.edges || []).map(e => ({
-          source: e.from,
-          target: e.to,
-          lineStyle: { color: e.stance === 'oppose' ? '#ff5f6d' : '#2ecc71', width: 2 },
-          label: { show: true, formatter: e.stance }
-        }));
-        conflictChart.setOption({ tooltip: {}, series: [{ type: 'graph', layout: 'force', roam: true, label: { show: true, color: '#dbe6ff' }, data: nodes, links }] });
+        renderCharts();
       } catch (e) {
         setStatusText(toErrorMessage(e, 'conflictFail'));
       }
@@ -1191,6 +1253,7 @@
         const failed = results.filter(r => r.status === 'rejected').length;
         try { await loadAgents(); } catch (_) {}
         try { await refreshRecentCases(); } catch (_) {}
+        try { await loadEventsFallback(); } catch (_) {}
         if (failed > 0) setStatusText(tr('initDonePartial'));
       });
     }
