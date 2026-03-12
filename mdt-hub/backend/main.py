@@ -1,13 +1,29 @@
 from __future__ import annotations
 
+import io
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+import requests
+from bs4 import BeautifulSoup
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
+
+try:
+    from pypdf import PdfReader
+except Exception:  # pragma: no cover
+    PdfReader = None
+
+try:
+    from PIL import Image
+    import pytesseract
+except Exception:  # pragma: no cover
+    Image = None
+    pytesseract = None
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "mdt.db"
@@ -47,18 +63,24 @@ class RoundReviewInput(BaseModel):
     to_round: int = Field(default=2, ge=2)
 
 
+class KnowledgeFeed(BaseModel):
+    content: str
+    source: str = "manual"
+    tags: list[str] = Field(default_factory=list)
+
+
+class URLIngest(BaseModel):
+    url: str
+    source: str = "url"
+
+
 class AgentCreate(BaseModel):
     agent_id: str
     role: str
     specialty: str
     prompt: str = ""
     enabled: bool = True
-
-
-class KnowledgeFeed(BaseModel):
-    content: str
-    source: str = "manual"
-    tags: list[str] = Field(default_factory=list)
+    auto_learn_web: bool = True
 
 
 class WSManager:
@@ -94,6 +116,23 @@ DEFAULT_SPECIALIST_PROFILES = [
     ("mdt-icu", "icu", "重症风险分层与支持治疗窗口"),
     ("mdt-evidence", "evidence", "指南与文献证据分级"),
 ]
+
+ROLE_PROMPT_TEMPLATES = {
+    "感染": "你是感染科专家，聚焦感染来源、耐药风险、覆盖策略与去升级路径，输出需含证据与禁忌。",
+    "药": "你是临床药师，聚焦剂量分层、相互作用、肝肾功能调整、毒性监测与TDM建议。",
+    "icu": "你是重症专家，聚焦器官功能风险、支持治疗窗口、恶化预警。",
+    "影像": "你是影像专家，聚焦CT/MRI关键征象、鉴别诊断、影像随访建议。",
+    "检验": "你是检验/检验医学专家，聚焦实验室指标趋势、异常解释与复查建议。",
+    "循证": "你是循证秘书，聚焦指南检索、文献摘要、证据分级和引用规范。",
+}
+
+ROLE_SKILL_HINTS = {
+    "感染": ["OpenClaw-Medical-Skills: antimicrobial stewardship", "mcp-simple-pubmed", "healthcare-mcp-public"],
+    "药": ["OpenClaw-Medical-Skills: clinical pharmacy", "healthcare-mcp-public"],
+    "影像": ["OpenClaw-Medical-Skills: radiology", "OCR/PDF ingestion"],
+    "检验": ["OpenClaw-Medical-Skills: lab interpretation", "healthcare-mcp-public"],
+    "循证": ["mcp-simple-pubmed", "OpenClaw-Medical-Skills: evidence synthesis"],
+}
 
 
 def conn() -> sqlite3.Connection:
@@ -153,6 +192,19 @@ def init_db() -> None:
               content text not null,
               source text not null,
               tags text,
+              created_at text not null
+            )
+            """
+        )
+        c.execute(
+            """
+            create table if not exists mdt_case_docs (
+              id integer primary key autoincrement,
+              case_id text not null,
+              doc_type text not null,
+              source text not null,
+              content text not null,
+              sections text,
               created_at text not null
             )
             """
@@ -228,6 +280,89 @@ def _knowledge_snippet(agent_id: str, limit: int = 2) -> str:
     return " | ".join((r["content"][:60] for r in rows))
 
 
+def _auto_prompt_for_role(role: str, specialty: str) -> str:
+    role_l = role.lower()
+    for key, prompt in ROLE_PROMPT_TEMPLATES.items():
+        if key in role or key in role_l or key in specialty.lower():
+            return prompt
+    return f"你是{role}专家，按{specialty}视角输出结构化观点，必须给出依据、风险与下一步建议。"
+
+
+def _skills_for_role(role: str, specialty: str) -> list[str]:
+    out = []
+    for key, vals in ROLE_SKILL_HINTS.items():
+        if key in role or key in role.lower() or key in specialty.lower():
+            out.extend(vals)
+    return sorted(set(out))
+
+
+def _extract_text_from_bytes(filename: str, data: bytes, content_type: str | None) -> str:
+    name = filename.lower()
+    ct = (content_type or "").lower()
+
+    if name.endswith(".txt") or "text/plain" in ct:
+        return data.decode("utf-8", errors="ignore")
+
+    if name.endswith(".pdf") or "pdf" in ct:
+        if not PdfReader:
+            return ""
+        reader = PdfReader(io.BytesIO(data))
+        return "\n".join([(p.extract_text() or "") for p in reader.pages]).strip()
+
+    if any(name.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp"]) or "image/" in ct:
+        if not (Image and pytesseract):
+            return ""
+        img = Image.open(io.BytesIO(data))
+        return pytesseract.image_to_string(img, lang="eng+chi_sim")
+
+    return data.decode("utf-8", errors="ignore")
+
+
+def _extract_text_from_url(url: str) -> str:
+    try:
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+    except requests.exceptions.SSLError:
+        # fallback for hosts with incomplete cert chain in some server environments
+        r = requests.get(url, timeout=20, verify=False)
+        r.raise_for_status()
+    ctype = (r.headers.get("content-type") or "").lower()
+    if "text/html" in ctype:
+        soup = BeautifulSoup(r.text, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.extract()
+        return " ".join(soup.get_text(" ").split())
+    if "application/pdf" in ctype and PdfReader:
+        reader = PdfReader(io.BytesIO(r.content))
+        return "\n".join([(p.extract_text() or "") for p in reader.pages]).strip()
+    return r.text
+
+
+def _extract_clinical_sections(text: str) -> dict[str, list[str]]:
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    imaging_kw = ("CT", "MRI", "影像", "胸片", "超声", "X线")
+    lab_kw = ("WBC", "CRP", "PCT", "肌酐", "ALT", "AST", "eGFR", "乳酸", "血小板")
+    meds_kw = ("抗", "药", "剂量", "mg", "q12h", "q8h")
+
+    imaging = [ln for ln in lines if any(k.lower() in ln.lower() for k in imaging_kw)][:30]
+    labs = [ln for ln in lines if any(k.lower() in ln.lower() for k in lab_kw)][:50]
+    meds = [ln for ln in lines if any(k.lower() in ln.lower() for k in meds_kw)][:50]
+
+    return {"imaging": imaging, "labs": labs, "medications": meds}
+
+
+def _store_case_doc(case_id: str, source: str, content: str, doc_type: str = "record") -> dict[str, Any]:
+    sections = _extract_clinical_sections(content)
+    now = datetime.now(timezone.utc).isoformat()
+    with conn() as c:
+        cur = c.execute(
+            "insert into mdt_case_docs(case_id, doc_type, source, content, sections, created_at) values (?,?,?,?,?,?)",
+            (case_id, doc_type, source, content, json.dumps(sections, ensure_ascii=False), now),
+        )
+        doc_id = cur.lastrowid
+    return {"doc_id": doc_id, "case_id": case_id, "sections": sections}
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
@@ -280,15 +415,26 @@ def list_agents() -> dict[str, Any]:
 @app.post("/agents")
 def create_agent(payload: AgentCreate) -> dict[str, Any]:
     now = datetime.now(timezone.utc).isoformat()
+    auto_prompt = _auto_prompt_for_role(payload.role, payload.specialty)
+    final_prompt = (auto_prompt + "\n" + payload.prompt).strip() if payload.prompt else auto_prompt
+    skill_suggestions = _skills_for_role(payload.role, payload.specialty)
+
     with conn() as c:
         try:
             c.execute(
                 "insert into mdt_agents(agent_id, role, specialty, prompt, enabled, created_at) values (?,?,?,?,?,?)",
-                (payload.agent_id, payload.role, payload.specialty, payload.prompt, 1 if payload.enabled else 0, now),
+                (payload.agent_id, payload.role, payload.specialty, final_prompt, 1 if payload.enabled else 0, now),
             )
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="agent_id already exists")
-    return {"ok": True, "agent_id": payload.agent_id}
+    return {
+        "ok": True,
+        "agent_id": payload.agent_id,
+        "generated_prompt": auto_prompt,
+        "final_prompt": final_prompt,
+        "skill_suggestions": skill_suggestions,
+        "web_learning": "enabled" if payload.auto_learn_web else "disabled",
+    }
 
 
 @app.post("/agents/{agent_id}/knowledge")
@@ -304,6 +450,46 @@ def feed_knowledge(agent_id: str, payload: KnowledgeFeed) -> dict[str, Any]:
             (agent_id, payload.content, payload.source, tags, now),
         )
     return {"ok": True, "agent_id": agent_id}
+
+
+@app.post("/agents/{agent_id}/knowledge/url")
+def feed_knowledge_url(agent_id: str, payload: URLIngest) -> dict[str, Any]:
+    text = _extract_text_from_url(payload.url)
+    if not text:
+        raise HTTPException(status_code=400, detail="unable to extract text from url")
+    content = text[:12000]
+    return feed_knowledge(agent_id, KnowledgeFeed(content=content, source=payload.url, tags=["url"]))
+
+
+@app.post("/agents/{agent_id}/knowledge/upload")
+async def feed_knowledge_upload(agent_id: str, file: UploadFile = File(...), tags: str = Form(default="")) -> dict[str, Any]:
+    data = await file.read()
+    text = _extract_text_from_bytes(file.filename or "upload.bin", data, file.content_type)
+    if not text:
+        raise HTTPException(status_code=400, detail="unable to extract text from file")
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+    return feed_knowledge(agent_id, KnowledgeFeed(content=text[:12000], source=file.filename or "upload", tags=tag_list or ["file"]))
+
+
+@app.post("/cases/{case_id}/documents/url")
+def ingest_case_doc_url(case_id: str, payload: URLIngest) -> dict[str, Any]:
+    _ensure_case(case_id)
+    text = _extract_text_from_url(payload.url)
+    if not text:
+        raise HTTPException(status_code=400, detail="unable to extract text from url")
+    stored = _store_case_doc(case_id, payload.url, text[:30000], doc_type="url")
+    return {"ok": True, **stored}
+
+
+@app.post("/cases/{case_id}/documents/upload")
+async def ingest_case_doc_upload(case_id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+    _ensure_case(case_id)
+    data = await file.read()
+    text = _extract_text_from_bytes(file.filename or "upload.bin", data, file.content_type)
+    if not text:
+        raise HTTPException(status_code=400, detail="unable to extract text from file")
+    stored = _store_case_doc(case_id, file.filename or "upload", text[:30000], doc_type="file")
+    return {"ok": True, **stored}
 
 
 @app.post("/discussion/submit")
@@ -427,6 +613,25 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
     await ws_manager.broadcast({"type": "mdt_event", "data": body})
 
     return {"accepted": True, "case_id": payload.case_id, "generated_count": generated + 1}
+
+
+@app.get("/cases/{case_id}/documents")
+def list_case_docs(case_id: str) -> dict[str, Any]:
+    with conn() as c:
+        rows = c.execute(
+            "select id, doc_type, source, sections, created_at from mdt_case_docs where case_id=? order by id desc",
+            (case_id,),
+        ).fetchall()
+    docs = []
+    for r in rows:
+        docs.append({
+            "id": r["id"],
+            "doc_type": r["doc_type"],
+            "source": r["source"],
+            "sections": json.loads(r["sections"] or "{}"),
+            "created_at": r["created_at"],
+        })
+    return {"case_id": case_id, "count": len(docs), "documents": docs}
 
 
 @app.get("/cases/{case_id}/conflicts")

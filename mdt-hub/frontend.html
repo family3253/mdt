@@ -146,19 +146,36 @@
       </div>
 
       <div class="panel">
+        <b>上传病历（文件/网址）</b>
+        <input id="caseDocUrl" placeholder="病历网址（支持网页/PDF链接）" />
+        <input id="caseDocFile" type="file" />
+        <div class="btn-row">
+          <button onclick="uploadCaseDocUrl()">导入网址病历</button>
+          <button onclick="uploadCaseDocFile()">上传病历文件</button>
+        </div>
+      </div>
+
+      <div class="panel">
         <b>新增 Agent</b>
         <input id="newAgentId" placeholder="agent_id e.g. mdt-radiology" />
         <input id="newAgentRole" placeholder="角色 e.g. 影像评估" />
         <input id="newAgentSpec" placeholder="specialty e.g. radiology" />
+        <textarea id="newAgentPrompt" placeholder="可选：自定义补充提示词"></textarea>
         <button onclick="createAgent()">新增</button>
       </div>
 
       <div class="panel">
-        <b>喂知识</b>
+        <b>喂知识（文本/文件/网址）</b>
         <input id="feedAgentId" placeholder="agent_id" />
         <input id="feedSource" value="manual" placeholder="source" />
         <textarea id="feedContent" placeholder="粘贴指南/经验知识...">AKI 场景优先按 eGFR 分层调整剂量并联合 TDM。</textarea>
-        <button onclick="feedKnowledge()">注入知识</button>
+        <input id="feedUrl" placeholder="知识网址（网页/PDF）" />
+        <input id="feedFile" type="file" />
+        <div class="btn-row">
+          <button onclick="feedKnowledge()">注入文本</button>
+          <button onclick="feedKnowledgeUrl()">注入网址</button>
+        </div>
+        <button onclick="feedKnowledgeFile()">注入文件</button>
       </div>
 
       <div class="panel muted" id="agentsList">当前 Agent: loading...</div>
@@ -334,12 +351,14 @@
       const agent_id = document.getElementById('newAgentId').value.trim();
       const role = document.getElementById('newAgentRole').value.trim();
       const specialty = document.getElementById('newAgentSpec').value.trim();
+      const prompt = document.getElementById('newAgentPrompt').value.trim();
       const resp = await fetch(`${API}/agents`, {
         method:'POST', headers:{'content-type':'application/json'},
-        body: JSON.stringify({agent_id, role, specialty})
+        body: JSON.stringify({agent_id, role, specialty, prompt, auto_learn_web: true})
       });
-      if (!resp.ok) { statusEl.textContent = `新增失败: ${await resp.text()}`; return; }
-      statusEl.textContent = `已新增 agent: ${agent_id}`;
+      const data = await resp.json();
+      if (!resp.ok) { statusEl.textContent = `新增失败: ${JSON.stringify(data)}`; return; }
+      statusEl.textContent = `已新增 ${agent_id}；推荐技能: ${(data.skill_suggestions || []).join(', ') || '无'}`;
       await loadAgents();
     }
 
@@ -352,7 +371,54 @@
         body: JSON.stringify({source, content, tags:[]})
       });
       if (!resp.ok) { statusEl.textContent = `喂知识失败: ${await resp.text()}`; return; }
-      statusEl.textContent = `已给 ${agent_id} 注入知识`;
+      statusEl.textContent = `已给 ${agent_id} 注入文本知识`;
+    }
+
+    async function feedKnowledgeUrl() {
+      const agent_id = document.getElementById('feedAgentId').value.trim();
+      const url = document.getElementById('feedUrl').value.trim();
+      const resp = await fetch(`${API}/agents/${agent_id}/knowledge/url`, {
+        method:'POST', headers:{'content-type':'application/json'},
+        body: JSON.stringify({url, source:'url'})
+      });
+      if (!resp.ok) { statusEl.textContent = `网址注入失败: ${await resp.text()}`; return; }
+      statusEl.textContent = `已给 ${agent_id} 注入网址知识`;
+    }
+
+    async function feedKnowledgeFile() {
+      const agent_id = document.getElementById('feedAgentId').value.trim();
+      const f = document.getElementById('feedFile').files[0];
+      if (!f) { statusEl.textContent = '请先选择知识文件'; return; }
+      const fd = new FormData();
+      fd.append('file', f);
+      fd.append('tags', 'file,upload');
+      const resp = await fetch(`${API}/agents/${agent_id}/knowledge/upload`, { method:'POST', body: fd });
+      if (!resp.ok) { statusEl.textContent = `文件注入失败: ${await resp.text()}`; return; }
+      statusEl.textContent = `已给 ${agent_id} 注入文件知识`;
+    }
+
+    async function uploadCaseDocUrl() {
+      const caseId = document.getElementById('caseId').value.trim();
+      const url = document.getElementById('caseDocUrl').value.trim();
+      const resp = await fetch(`${API}/cases/${caseId}/documents/url`, {
+        method:'POST', headers:{'content-type':'application/json'},
+        body: JSON.stringify({url, source:'url'})
+      });
+      const data = await resp.json();
+      if (!resp.ok) { statusEl.textContent = `病历网址导入失败: ${JSON.stringify(data)}`; return; }
+      statusEl.textContent = `病历导入完成，提取影像${(data.sections?.imaging||[]).length}条，检验${(data.sections?.labs||[]).length}条`;
+    }
+
+    async function uploadCaseDocFile() {
+      const caseId = document.getElementById('caseId').value.trim();
+      const f = document.getElementById('caseDocFile').files[0];
+      if (!f) { statusEl.textContent = '请先选择病历文件'; return; }
+      const fd = new FormData();
+      fd.append('file', f);
+      const resp = await fetch(`${API}/cases/${caseId}/documents/upload`, { method:'POST', body: fd });
+      const data = await resp.json();
+      if (!resp.ok) { statusEl.textContent = `病历文件导入失败: ${JSON.stringify(data)}`; return; }
+      statusEl.textContent = `病历上传完成，提取影像${(data.sections?.imaging||[]).length}条，检验${(data.sections?.labs||[]).length}条`;
     }
 
     async function loadAgents() {
