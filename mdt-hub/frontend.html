@@ -245,6 +245,11 @@
       <div class="panel">
         <b data-i18n="consultInput">会诊输入</b>
         <input id="caseId" value="CASE-LIVE-001" placeholder="Case ID" />
+        <div class="btn-row" style="margin-top:8px; grid-template-columns: 1fr auto;">
+          <select id="recentCaseSelect"></select>
+          <button class="btn-ghost" style="width:auto; padding:10px 12px;" onclick="refreshRecentCases()" data-i18n="refreshCases">刷新病例</button>
+        </div>
+        <button class="btn-ghost" onclick="applySelectedCase()" data-i18n="useSelectedCase">切换到所选病例</button>
         <textarea id="msg" data-i18n-ph="msgPlaceholder" placeholder="输入临床问题...">患者发热低血压，近期广谱抗菌药暴露，伴 AKI 风险</textarea>
         <label class="check-inline" style="margin-top:8px; display:flex;">
           <input id="enableDocsContext" type="checkbox" checked />
@@ -367,7 +372,7 @@
       zh: {
         pageTitle: 'MDT 会诊控制台', headerTitle: 'MDT 控制台', wsConnecting: '连接中...', statusWaiting: '等待操作',
         diagTitle: '连接诊断', retryModels: '重试加载模型', retryAgents: '重试加载 Agent',
-        consultInput: '会诊输入', msgPlaceholder: '输入临床问题...', enableDocs: '启用病历直读上下文', submitDiscussion: '提交讨论', reviewRound: '二轮互评', refreshConflict: '刷新冲突图',
+        consultInput: '会诊输入', msgPlaceholder: '输入临床问题...', refreshCases: '刷新病例', useSelectedCase: '切换到所选病例', enableDocs: '启用病历直读上下文', submitDiscussion: '提交讨论', reviewRound: '二轮互评', refreshConflict: '刷新冲突图',
         uploadCaseTitle: '上传病历（文件/网址）', caseDocUrlPlaceholder: '病历网址（支持网页/PDF链接）', importCaseUrl: '导入网址病历', uploadCaseFile: '上传病历文件',
         parsedPanelTitle: '病历解析结果面板（可编辑确认）', parsedPanelHint: '提交会诊前可确认/采纳影像、检验、用药条目',
         imaging: '影像', labs: '检验', medications: '用药', addImaging: '+ 新增影像条目', addLabs: '+ 新增检验条目', addMeds: '+ 新增用药条目',
@@ -384,7 +389,7 @@
         reqFail: '请求失败',
         needQuestion: '请先输入会诊问题',
         panelCleared: '病历解析结果面板已清空',
-        noParsedDoc: '当前病例暂无解析病历', loadedLatest: '已加载最近病历解析结果（文档ID {id}）', loadFailed: '加载失败',
+        noParsedDoc: '当前病例暂无解析病历', loadedLatest: '已加载最近病历解析结果（文档ID {id}）', loadFailed: '加载失败', recentCasesEmpty: '暂无历史病例', recentCasesFail: '加载病例列表失败', switchedCase: '已切换病例：{id}',
         submitOk: '已提交讨论，生成 {count} 条响应（已带入确认条目 {picked} 条，病历上下文:{docsOn} 文档{docCount}份）', on: '开', off: '关', submitFail: '提交失败',
         reviewOk: '二轮互评完成，新增 {count} 条事件', reviewFail: '二轮互评失败',
         addAgentOk: '已新增 {id}（模型: {model}）；推荐技能: {skills}', addFail: '新增失败', none: '无',
@@ -404,7 +409,7 @@
       en: {
         pageTitle: 'MDT Consultation Console', headerTitle: 'MDT Console', wsConnecting: 'Connecting...', statusWaiting: 'Waiting for actions',
         diagTitle: 'Connectivity Diagnostics', retryModels: 'Retry Models', retryAgents: 'Retry Agents',
-        consultInput: 'Consultation Input', msgPlaceholder: 'Enter clinical question...', enableDocs: 'Enable direct EMR context', submitDiscussion: 'Submit Discussion', reviewRound: 'Round-2 Peer Review', refreshConflict: 'Refresh Conflict Graph',
+        consultInput: 'Consultation Input', msgPlaceholder: 'Enter clinical question...', refreshCases: 'Refresh Cases', useSelectedCase: 'Switch to Selected Case', enableDocs: 'Enable direct EMR context', submitDiscussion: 'Submit Discussion', reviewRound: 'Round-2 Peer Review', refreshConflict: 'Refresh Conflict Graph',
         uploadCaseTitle: 'Upload Case Records (File/URL)', caseDocUrlPlaceholder: 'Case URL (web/PDF supported)', importCaseUrl: 'Import URL Record', uploadCaseFile: 'Upload Case File',
         parsedPanelTitle: 'Parsed Case Panel (Editable Confirmation)', parsedPanelHint: 'Confirm/adopt imaging, labs and medication items before submission',
         imaging: 'Imaging', labs: 'Labs', medications: 'Medications', addImaging: '+ Add Imaging Item', addLabs: '+ Add Lab Item', addMeds: '+ Add Medication Item',
@@ -421,7 +426,7 @@
         reqFail: 'Request failed',
         needQuestion: 'Please enter a consultation question first',
         panelCleared: 'Parsed panel has been cleared',
-        noParsedDoc: 'No parsed case records found for this case', loadedLatest: 'Latest parsed record loaded (Doc ID {id})', loadFailed: 'Load failed',
+        noParsedDoc: 'No parsed case records found for this case', loadedLatest: 'Latest parsed record loaded (Doc ID {id})', loadFailed: 'Load failed', recentCasesEmpty: 'No recent cases', recentCasesFail: 'Failed to load case list', switchedCase: 'Switched case: {id}',
         submitOk: 'Discussion submitted. {count} responses generated ({picked} confirmed items included, docs context:{docsOn} docs={docCount})', on: 'on', off: 'off', submitFail: 'Submit failed',
         reviewOk: 'Round-2 review complete, {count} events added', reviewFail: 'Round-2 review failed',
         addAgentOk: 'Agent {id} created (model: {model}); suggested skills: {skills}', addFail: 'Create agent failed', none: 'none',
@@ -476,6 +481,7 @@
       currentLang = lang;
       localStorage.setItem('mdt_lang', lang);
       applyI18n();
+      refreshRecentCases().catch(() => {});
     }
 
     function setWsState(text, level = 'warn') {
@@ -728,6 +734,41 @@
       }
     }
 
+    async function refreshRecentCases() {
+      const select = document.getElementById('recentCaseSelect');
+      try {
+        const { data } = await requestWithMeta('/cases/recent?limit=30');
+        const items = data.cases || [];
+        select.innerHTML = '';
+        if (!items.length) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = tr('recentCasesEmpty');
+          select.appendChild(opt);
+          return;
+        }
+        items.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.case_id;
+          opt.textContent = `${c.case_id} (${c.event_count || 0})`;
+          select.appendChild(opt);
+        });
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'recentCasesFail'));
+      }
+    }
+
+    async function applySelectedCase() {
+      const select = document.getElementById('recentCaseSelect');
+      const caseId = (select.value || '').trim();
+      if (!caseId) return;
+      document.getElementById('caseId').value = caseId;
+      setStatusText(tr('switchedCase', { id: caseId }));
+      await loadLatestParsedSections();
+      await loadEventsFallback();
+      await loadConflictGraph();
+    }
+
     function updateSeat(ev) {
       const id = ev.speaker;
       if (!id) return;
@@ -898,6 +939,7 @@
         });
         const picked = Object.values(confirmedSections).reduce((n, arr) => n + (arr || []).filter(x => x.confirmed).length, 0);
         setStatusText(tr('submitOk', { count: data.generated_count, picked, docsOn: data.docs_context_enabled ? tr('on') : tr('off'), docCount: data.docs_context_doc_count ?? 0 }));
+        await refreshRecentCases();
       } catch (e) {
         setStatusText(toErrorMessage(e, 'submitFail'));
       }
@@ -1148,6 +1190,7 @@
       Promise.allSettled([loadAvailableModels()]).then(async (results) => {
         const failed = results.filter(r => r.status === 'rejected').length;
         try { await loadAgents(); } catch (_) {}
+        try { await refreshRecentCases(); } catch (_) {}
         if (failed > 0) setStatusText(tr('initDonePartial'));
       });
     }

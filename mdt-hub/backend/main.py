@@ -696,6 +696,24 @@ def open_case(payload: CaseOpen) -> dict[str, Any]:
     return {"ok": True, "case_id": payload.case_id, "opened_at": opened_at, "already_exists": False}
 
 
+@app.get("/cases/recent")
+def list_recent_cases(limit: int = 20) -> dict[str, Any]:
+    cap = max(1, min(int(limit or 20), 100))
+    with conn() as c:
+        rows = c.execute(
+            """
+            select case_id, status, opened_at,
+                   (select max(timestamp) from mdt_events e where e.case_id = cases.case_id) as last_event_at,
+                   (select count(1) from mdt_events e where e.case_id = cases.case_id) as event_count
+            from cases
+            order by coalesce(last_event_at, opened_at) desc
+            limit ?
+            """,
+            (cap,),
+        ).fetchall()
+    return {"count": len(rows), "cases": [dict(r) for r in rows]}
+
+
 @app.post("/events")
 async def ingest_event(event: MDTEvent) -> dict[str, Any]:
     body = _persist_event(event)
