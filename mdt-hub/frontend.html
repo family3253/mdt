@@ -142,6 +142,13 @@
     .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
     .chart { height: 300px; }
     .timeline { max-height: 320px; overflow: auto; }
+    .timeline .ev.full { border-color: rgba(110,168,254,.4); background: rgba(15,22,40,.6); border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+    .timeline .ev.full .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: rgba(110,168,254,.18); color: #cfe0ff; margin-right: 6px; }
+    .timeline .ev.full .sentence { color: #e7edff; font-size: 13px; line-height: 1.5; margin-top: 4px; }
+    .report-panel { max-height: 460px; overflow: auto; line-height: 1.6; }
+    .report-panel h4 { margin: 8px 0 6px; font-size: 14px; color: #dce8ff; }
+    .report-list { margin: 0; padding-left: 16px; }
+    .report-card { border: 1px solid #2a375f; border-radius: 10px; padding: 10px; background: rgba(10,16,32,.7); margin-bottom: 10px; }
 
     .section-col { border: 1px solid #2a375f; border-radius: 10px; padding: 8px; background: #0f152a; min-height: 220px; }
     .section-col h4 { margin: 0 0 8px; font-size: 14px; color: #dce8ff; }
@@ -336,6 +343,7 @@
       <div class="tabs">
         <div class="tab active" data-tab="room" data-i18n="tabRoom">会诊室视图</div>
         <div class="tab" data-tab="analytics" data-i18n="tabAnalytics">数据分析视图</div>
+        <div class="tab" data-tab="report" data-i18n="tabReport">会诊报告</div>
       </div>
 
       <section id="view-room" class="view active">
@@ -365,6 +373,17 @@
           </div>
         </div>
       </section>
+
+      <section id="view-report" class="view">
+        <div class="panel">
+          <div class="btn-row">
+            <button class="btn-primary" onclick="loadCaseReport()" data-i18n="loadReport">生成/刷新会诊报告</button>
+            <button class="btn-secondary" onclick="copyReport()" data-i18n="copyReport">复制报告</button>
+          </div>
+          <div class="muted" id="reportMeta" style="margin-top:8px;">-</div>
+          <div id="reportBody" class="report-panel" style="margin-top:10px;"></div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -381,7 +400,7 @@
         addAgentTitle: '新增 Agent', newAgentRolePlaceholder: '角色 e.g. 影像评估', newAgentPromptPlaceholder: '可选：自定义补充提示词', create: '新增',
         feedKnowledgeTitle: '喂知识（文本/文件/网址）', feedContentPlaceholder: '粘贴指南/经验知识...', feedUrlPlaceholder: '知识网址（网页/PDF）', injectText: '注入文本', injectUrl: '注入网址', injectFile: '注入文件',
         agentModelTitle: 'Agent 模型配置', agentsLoading: '当前 Agent: loading...',
-        tabRoom: '会诊室视图', tabAnalytics: '数据分析视图', timelineTitle: '实时时间线', speakerDist: '专家发言分布', consensusCurve: '共识收敛曲线', conflictGraph: '冲突关系图',
+        tabRoom: '会诊室视图', tabAnalytics: '数据分析视图', tabReport: '会诊报告', timelineTitle: '实时时间线', speakerDist: '专家发言分布', consensusCurve: '共识收敛曲线', conflictGraph: '冲突关系图',
         meetingTable: 'MDT 会诊桌（实时交互）', standby: '待命中',
         confirmAdopt: '确认/采纳', delete: '删除', emptyItems: '暂无条目，可手动新增或先导入病历。', emptyItemWarn: '存在空条目，提交时会自动忽略。',
         diagApiFmt: 'API: {api}', diagModelsFmt: 'models: {status} | {duration}ms | {time}', diagAgentsFmt: 'agents: {status} | {duration}ms | {time}',
@@ -400,12 +419,15 @@
         caseImportDone: '病历导入完成，提取影像{imaging}条，检验{labs}条，用药{meds}条', caseImportFail: '病历网址导入失败',
         selectCaseFile: '请先选择病历文件', caseUploadDone: '病历上传完成，提取影像{imaging}条，检验{labs}条，用药{meds}条', caseUploadFail: '病历文件导入失败',
         defaultModelOpt: '默认模型（{model}）',
+        needCaseId: '请先填写病例 ID',
         modelsFallback: '模型列表使用降级配置：{note}',
         agentsListFmt: '当前 Agent({count}): {agents}', saveModel: '保存模型',
         conflictFail: '加载冲突图失败', roundStateTitle: '迭代状态', roundStateFmt: '当前轮次: {round} | 冲突数: {conflicts} | 已统一: {unified}', yes: '是', no: '否',
         modelsLoadOk: '模型列表加载成功', modelsLoadFail: '加载模型列表失败', agentsLoadOk: 'Agent 列表加载成功', agentsLoadFail: '加载 Agent 列表失败',
         wsInit: '初始化中（WebSocket 优先）', wsInitHint: '已使用同源 API/WS；如反代路径特殊可加 ?api=http://host:port 覆盖', initDonePartial: '初始化完成（模型列表加载失败，可手动重试）',
         wsConnectingState: 'WebSocket 连接中...', wsOpen: 'WebSocket 已连接（实时）', wsHandshakeTimeout: 'WebSocket 握手超时（降级轮询）', wsError: 'WebSocket 异常（降级轮询）', wsClosedFmt: 'WebSocket 断开（{reason}，降级轮询）', speakerEmpty: '暂无当前病例专家发言 / No speaker data for current case', consensusEmpty: '暂无共识曲线数据 / No consensus points for current case', conflictEmpty: '暂无冲突关系数据 / No conflict edges for current case',
+        loadReport: '生成/刷新会诊报告', copyReport: '复制报告', reportEmpty: '暂无报告数据', reportCopied: '报告已复制', reportLoadFail: '报告加载失败', sentenceBadge: '逐句',
+        basicSummary: '基本病例摘要', clinicalQuestion: '临床问题', summaryText: '摘要', patientSummary: '病例信息', expertOpinions: '各专家核心意见', disputeProcess: '争议点与收敛过程', convergenceTimeline: '收敛时间线', finalConsensus: '最终共识', actionItems: '建议行动项',
       },
       en: {
         pageTitle: 'MDT Consultation Console', headerTitle: 'MDT Console', wsConnecting: 'Connecting...', statusWaiting: 'Waiting for actions',
@@ -418,7 +440,7 @@
         addAgentTitle: 'Add Agent', newAgentRolePlaceholder: 'Role e.g. Imaging Review', newAgentPromptPlaceholder: 'Optional: custom supplemental prompt', create: 'Create',
         feedKnowledgeTitle: 'Feed Knowledge (Text/File/URL)', feedContentPlaceholder: 'Paste guidelines/experience...', feedUrlPlaceholder: 'Knowledge URL (web/PDF)', injectText: 'Inject Text', injectUrl: 'Inject URL', injectFile: 'Inject File',
         agentModelTitle: 'Agent Model Settings', agentsLoading: 'Current Agents: loading...',
-        tabRoom: 'Conference Room View', tabAnalytics: 'Analytics View', timelineTitle: 'Real-time Timeline', speakerDist: 'Speaker Distribution', consensusCurve: 'Consensus Convergence', conflictGraph: 'Conflict Graph',
+        tabRoom: 'Conference Room View', tabAnalytics: 'Analytics View', tabReport: 'Consultation Report', timelineTitle: 'Real-time Timeline', speakerDist: 'Speaker Distribution', consensusCurve: 'Consensus Convergence', conflictGraph: 'Conflict Graph',
         meetingTable: 'MDT Conference Table (Realtime)', standby: 'Standby',
         confirmAdopt: 'Confirm/Adopt', delete: 'Delete', emptyItems: 'No items yet. Add manually or import a case record first.', emptyItemWarn: 'Empty items exist and will be ignored on submit.',
         diagApiFmt: 'API: {api}', diagModelsFmt: 'models: {status} | {duration}ms | {time}', diagAgentsFmt: 'agents: {status} | {duration}ms | {time}',
@@ -437,12 +459,15 @@
         caseImportDone: 'Case URL imported, extracted imaging {imaging}, labs {labs}, meds {meds}', caseImportFail: 'Case URL import failed',
         selectCaseFile: 'Please select a case file first', caseUploadDone: 'Case file uploaded, extracted imaging {imaging}, labs {labs}, meds {meds}', caseUploadFail: 'Case file import failed',
         defaultModelOpt: 'Default model ({model})',
+        needCaseId: 'Please enter case ID first',
         modelsFallback: 'Model list uses fallback config: {note}',
         agentsListFmt: 'Current Agents ({count}): {agents}', saveModel: 'Save',
         conflictFail: 'Load conflict graph failed', roundStateTitle: 'Iteration State', roundStateFmt: 'Current round: {round} | Open conflicts: {conflicts} | Unified: {unified}', yes: 'Yes', no: 'No',
         modelsLoadOk: 'Model list loaded', modelsLoadFail: 'Model list load failed', agentsLoadOk: 'Agent list loaded', agentsLoadFail: 'Agent list load failed',
         wsInit: 'Initializing (WebSocket preferred)', wsInitHint: 'Using same-origin API/WS; append ?api=http://host:port if reverse-proxy path differs', initDonePartial: 'Initialization done (model list failed, retry manually)',
         wsConnectingState: 'WebSocket connecting...', wsOpen: 'WebSocket connected (realtime)', wsHandshakeTimeout: 'WebSocket handshake timeout (fallback to polling)', wsError: 'WebSocket error (fallback to polling)', wsClosedFmt: 'WebSocket closed ({reason}, fallback to polling)', speakerEmpty: 'No speaker data for current case / 暂无当前病例专家发言', consensusEmpty: 'No consensus points for current case / 暂无共识曲线数据', conflictEmpty: 'No conflict edges for current case / 暂无冲突关系数据',
+        loadReport: 'Generate/Refresh Report', copyReport: 'Copy Report', reportEmpty: 'No report data', reportCopied: 'Report copied', reportLoadFail: 'Report load failed', sentenceBadge: 'Sentence',
+        basicSummary: 'Case Summary', clinicalQuestion: 'Clinical Question', summaryText: 'Summary', patientSummary: 'Patient Summary', expertOpinions: 'Expert Opinions', disputeProcess: 'Disputes & Convergence', convergenceTimeline: 'Convergence Timeline', finalConsensus: 'Final Consensus', actionItems: 'Action Items',
       }
     };
 
@@ -511,6 +536,8 @@
     const timeline = document.getElementById('timeline');
     const roundStateEl = document.getElementById('roundState');
     const room = document.getElementById('room');
+    const reportBody = document.getElementById('reportBody');
+    const reportMeta = document.getElementById('reportMeta');
     const diagApi = document.getElementById('diagApi');
     const diagModels = document.getElementById('diagModels');
     const diagAgents = document.getElementById('diagAgents');
@@ -767,6 +794,7 @@
       document.getElementById('caseId').value = caseId;
       setStatusText(tr('switchedCase', { id: caseId }));
       clearCaseScopedState();
+      clearReportView();
       await loadLatestParsedSections();
       await loadEventsFallback();
     }
@@ -818,8 +846,21 @@
       const sorted = [...currentCaseEvents].sort((a, b) => (a.event_id || 0) - (b.event_id || 0));
       sorted.forEach(ev => {
         const div = document.createElement('div');
-        div.className = 'ev';
-        div.innerHTML = `<b>${ev.event_type}</b> · ${ev.speaker}<div class='muted'>${ev.timestamp} | round=${ev.round_no} | conf=${ev.confidence ?? '-'}</div><div class='muted'>${summarizeEventPayload(ev.payload || {}, ev.event_type)}</div>`;
+        const isSentence = ev.event_type === 'expert_sentence';
+        div.className = isSentence ? 'ev full' : 'ev';
+        if (isSentence) {
+          const payload = ev.payload || {};
+          const text = payload.text || '';
+          const stance = payload.stance ? ` | ${payload.stance}` : '';
+          div.innerHTML = `
+            <span class='badge'>${tr('sentenceBadge')}</span>
+            <b>${ev.speaker}</b>${stance}
+            <div class='muted'>${ev.timestamp} | round=${ev.round_no} | conf=${ev.confidence ?? '-'}</div>
+            <div class='sentence'>${text}</div>
+          `;
+        } else {
+          div.innerHTML = `<b>${ev.event_type}</b> · ${ev.speaker}<div class='muted'>${ev.timestamp} | round=${ev.round_no} | conf=${ev.confidence ?? '-'}</div><div class='muted'>${summarizeEventPayload(ev.payload || {}, ev.event_type)}</div>`;
+        }
         timeline.prepend(div);
       });
       updateRoundState();
@@ -833,6 +874,11 @@
       renderRoom();
       roundStateEl.textContent = tr('roundStateFmt', { round: '-', conflicts: '-', unified: '-' });
       renderCharts();
+    }
+
+    function clearReportView() {
+      if (reportBody) reportBody.innerHTML = `<div class="empty-tip">${tr('reportEmpty')}</div>`;
+      if (reportMeta) reportMeta.textContent = '-';
     }
 
     function recomputeAnalytics() {
@@ -926,6 +972,77 @@
         pollBackoffIndex = Math.min(pollBackoffIndex + 1, pollBackoffDelays.length - 1);
       } finally {
         scheduleNextPoll();
+      }
+    }
+
+    function renderReportContent(report) {
+      if (!report) {
+        clearReportView();
+        return;
+      }
+      const basic = report.basic_case_summary || {};
+      const patientSummary = basic.patient_summary || {};
+      const summaryText = basic.summary_text || '';
+      const clinicalQuestion = basic.clinical_question || '';
+
+      const opinionList = (report.expert_opinions || []).map(op => `
+        <div class="report-card">
+          <div class="muted">Round ${op.round_no ?? '-'} · ${op.speaker || '-'} ${op.specialty ? `(${op.specialty})` : ''} · ${op.timestamp || '-'}</div>
+          <div class="sentence">${op.text || ''}</div>
+        </div>
+      `).join('') || `<div class="empty-tip">${tr('reportEmpty')}</div>`;
+
+      const disputeList = (report.disputes || []).map(d => `<li>${d.round_no ?? '-'} / ${d.speaker || '-'}：${d.summary || ''}</li>`).join('') || `<li>${tr('reportEmpty')}</li>`;
+      const convergenceList = (report.convergence_timeline || []).map(c => `<li>${c.round_no ?? '-'} · ${c.event_type || ''} · ${c.summary || ''} · score=${c.consensus_score ?? '-'} · conflicts=${c.open_conflicts ?? '-'}</li>`).join('') || `<li>${tr('reportEmpty')}</li>`;
+      const finalConsensus = report.final_consensus || {};
+      const actionItems = (report.action_items || []).map(a => `<li>${a}</li>`).join('') || `<li>${tr('reportEmpty')}</li>`;
+
+      reportBody.innerHTML = `
+        <h4>${tr('basicSummary')}</h4>
+        <div class="report-card">
+          <div><b>${tr('clinicalQuestion')}</b> ${clinicalQuestion || '-'}</div>
+          <div><b>${tr('summaryText')}</b> ${summaryText || '-'}</div>
+          <div><b>${tr('patientSummary')}</b> ${JSON.stringify(patientSummary)}</div>
+        </div>
+        <h4>${tr('expertOpinions')}</h4>
+        ${opinionList}
+        <h4>${tr('disputeProcess')}</h4>
+        <ul class="report-list">${disputeList}</ul>
+        <h4>${tr('convergenceTimeline')}</h4>
+        <ul class="report-list">${convergenceList}</ul>
+        <h4>${tr('finalConsensus')}</h4>
+        <div class="report-card">
+          <div>${finalConsensus.summary || '-'}</div>
+          <div class="muted">score=${finalConsensus.consensus_score ?? '-'} · round=${finalConsensus.round_no ?? '-'} · ${finalConsensus.timestamp || '-'}</div>
+          <div><b>${tr('actions')}</b> ${(finalConsensus.actions || []).join('；') || '-'}</div>
+        </div>
+        <h4>${tr('actionItems')}</h4>
+        <ul class="report-list">${actionItems}</ul>
+      `;
+
+      if (reportMeta) {
+        reportMeta.textContent = `${report.case_id} · ${report.generated_at} · ${report.case_status}`;
+      }
+    }
+
+    async function loadCaseReport() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/report`);
+        renderReportContent(data.report);
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'reportLoadFail'));
+      }
+    }
+
+    async function copyReport() {
+      if (!reportBody || !reportBody.textContent) return;
+      try {
+        await navigator.clipboard.writeText(reportBody.textContent);
+        setStatusText(tr('reportCopied'));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'reportLoadFail'));
       }
     }
 

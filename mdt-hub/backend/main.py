@@ -331,6 +331,93 @@ def _persist_event(event: MDTEvent) -> dict[str, Any]:
     return {"event_id": event_id, **event.model_dump(mode="json")}
 
 
+def _summarize_text(text: str, limit: int = 160) -> str:
+    if not text:
+        return ""
+    cleaned = re.sub(r"\s+", " ", str(text)).strip()
+    return cleaned[:limit]
+
+
+def _split_sentences(text: str) -> list[str]:
+    if not text:
+        return []
+    cleaned = re.sub(r"\s+", " ", str(text)).strip()
+    if not cleaned:
+        return []
+    parts = re.split(r"(?<=[。！？!?;；\.])\s*", cleaned)
+    sentences = [p.strip() for p in parts if p.strip()]
+    return sentences or [cleaned]
+
+
+def _structured_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    fields = {}
+    for key in ("assessment", "actions", "risks", "questions"):
+        val = payload.get(key)
+        if val:
+            fields[key] = val
+    return fields
+
+
+def _event_text_source(payload: dict[str, Any]) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    for key in ("discussion", "review", "summary", "text"):
+        val = payload.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    assessment = payload.get("assessment")
+    if isinstance(assessment, list) and assessment:
+        return "；".join([str(x).strip() for x in assessment if str(x).strip()])
+    if isinstance(assessment, str) and assessment.strip():
+        return assessment.strip()
+    return ""
+
+
+def _persist_sentence_events(event: MDTEvent, source_event_id: int) -> list[dict[str, Any]]:
+    if event.event_type == "expert_sentence":
+        return []
+    source_text = _event_text_source(event.payload)
+    sentences = _split_sentences(source_text)
+    if not sentences:
+        return []
+    structured = _structured_fields(event.payload)
+    stance = None
+    if isinstance(event.payload, dict):
+        stance = event.payload.get("stance")
+    source_summary = _summarize_text(source_text, 200)
+    bodies = []
+    for sent in sentences:
+        payload = {
+            "text": sent,
+            "stance": stance,
+            "structured_fields": structured,
+            "raw_text_summary": source_summary,
+            "source_event_type": event.event_type,
+            "source_event_id": source_event_id,
+            "reply_to_event_id": event.reply_to_event_id,
+        }
+        ev = MDTEvent(
+            case_id=event.case_id,
+            round_no=event.round_no,
+            event_type="expert_sentence",
+            speaker=event.speaker,
+            specialty=event.specialty,
+            payload=payload,
+            confidence=event.confidence,
+            reply_to_event_id=event.reply_to_event_id,
+        )
+        bodies.append(_persist_event(ev))
+    return bodies
+
+
+def _persist_event_with_sentences(event: MDTEvent) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    body = _persist_event(event)
+    sentence_bodies = _persist_sentence_events(event, body["event_id"])
+    return body, sentence_bodies
+
+
 def _latest_round(case_id: str) -> int:
     with conn() as c:
         row = c.execute("select max(round_no) as r from mdt_events where case_id=?", (case_id,)).fetchone()
@@ -629,6 +716,164 @@ def _check_unified(case_id: str, current_round: int, open_conflicts: int, curren
     }
     return unified, detail
 
+
+def _load_case_events(case_id: str) -> list[dict[str, Any]]:
+    with conn() as c:
+        rows = c.execute("select * from mdt_events where case_id=? order by event_id asc", (case_id,)).fetchall()
+    events = []
+    for r in rows:
+        events.append(
+            {
+                "event_id": r["event_id"],
+                "case_id": r["case_id"],
+                "round_no": r["round_no"],
+                "event_type": r["event_type"],
+                "speaker": r["speaker"],
+                "specialty": r["specialty"],
+                "payload": json.loads(r["payload"]),
+                "confidence": r["confidence"],
+                "reply_to_event_id": r["reply_to_event_id"],
+                "timestamp": r["timestamp"],
+            }
+        )
+    return events
+
+
+def _build_case_report(case_id: str) -> dict[str, Any]:
+    with conn() as c:
+        row = c.execute("select case_id, opened_at, closed_at, patient_summary, status from cases where case_id=?", (case_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="case not found")
+
+    events = _load_case_events(case_id)
+    patient_summary = json.loads(row["patient_summary"] or "{}")
+    discussion_events = [e for e in events if e["event_type"] == "discussion_message"]
+    latest_discussion = discussion_events[-1] if discussion_events else None
+    clinical_question = ""
+    if latest_discussion:
+        clinical_question = str(latest_discussion.get("payload", {}).get("text", ""))
+
+    sentence_events = [e for e in events if e["event_type"] == "expert_sentence"]
+    expert_opinions = []
+    for ev in sentence_events:
+        payload = ev.get("payload") or {}
+        expert_opinions.append(
+            {
+                "round_no": ev.get("round_no"),
+                "speaker": ev.get("speaker"),
+                "specialty": ev.get("specialty"),
+                "text": payload.get("text") or "",
+                "stance": payload.get("stance"),
+                "source_event_type": payload.get("source_event_type"),
+                "source_event_id": payload.get("source_event_id"),
+                "timestamp": ev.get("timestamp"),
+            }
+        )
+
+    disputes = []
+    for ev in events:
+        payload = ev.get("payload") or {}
+        stance = str(payload.get("stance") or "").lower()
+        if ev["event_type"] in ("agent_opinion", "agent_review") and stance in ("disagree", "oppose"):
+            disputes.append(
+                {
+                    "round_no": ev.get("round_no"),
+                    "speaker": ev.get("speaker"),
+                    "stance": stance,
+                    "summary": _summarize_text(payload.get("review") or payload.get("discussion") or ""),
+                    "event_id": ev.get("event_id"),
+                    "timestamp": ev.get("timestamp"),
+                }
+            )
+        if ev["event_type"] in ("conflict_detected", "targeted_followup"):
+            disputes.append(
+                {
+                    "round_no": ev.get("round_no"),
+                    "speaker": ev.get("speaker"),
+                    "stance": payload.get("stance") or "conflict",
+                    "summary": _summarize_text(payload.get("summary") or payload.get("topic") or payload.get("open_issue") or ""),
+                    "event_id": ev.get("event_id"),
+                    "timestamp": ev.get("timestamp"),
+                }
+            )
+
+    convergence_timeline = []
+    for ev in events:
+        if ev["event_type"] in ("consensus_updated", "final_consensus"):
+            payload = ev.get("payload") or {}
+            convergence_timeline.append(
+                {
+                    "round_no": ev.get("round_no"),
+                    "event_type": ev.get("event_type"),
+                    "summary": payload.get("summary") or payload.get("status"),
+                    "consensus_score": payload.get("consensus_score") or payload.get("confidence") or ev.get("confidence"),
+                    "open_conflicts": payload.get("open_conflicts") or payload.get("disagree_count"),
+                    "event_id": ev.get("event_id"),
+                    "timestamp": ev.get("timestamp"),
+                }
+            )
+
+    final_consensus_event = None
+    for ev in reversed(events):
+        if ev["event_type"] == "final_consensus":
+            final_consensus_event = ev
+            break
+    if not final_consensus_event:
+        for ev in reversed(events):
+            if ev["event_type"] == "consensus_updated":
+                final_consensus_event = ev
+                break
+
+    final_consensus = {}
+    if final_consensus_event:
+        payload = final_consensus_event.get("payload") or {}
+        final_consensus = {
+            "summary": payload.get("summary") or payload.get("status") or "",
+            "assessment": payload.get("assessment") or [],
+            "actions": payload.get("actions") or [],
+            "risks": payload.get("risks") or [],
+            "questions": payload.get("questions") or [],
+            "consensus_score": payload.get("consensus_score") or payload.get("confidence") or final_consensus_event.get("confidence"),
+            "event_id": final_consensus_event.get("event_id"),
+            "round_no": final_consensus_event.get("round_no"),
+            "timestamp": final_consensus_event.get("timestamp"),
+        }
+
+    action_items: list[str] = []
+    for ev in events:
+        payload = ev.get("payload") or {}
+        actions = []
+        if isinstance(payload.get("actions"), list):
+            actions.extend(payload.get("actions"))
+        if ev["event_type"] == "expert_sentence":
+            structured = payload.get("structured_fields") or {}
+            if isinstance(structured.get("actions"), list):
+                actions.extend(structured.get("actions"))
+        for act in actions:
+            txt = str(act).strip()
+            if txt and txt not in action_items:
+                action_items.append(txt)
+
+    report = {
+        "case_id": case_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "case_status": row["status"],
+        "opened_at": row["opened_at"],
+        "closed_at": row["closed_at"],
+        "basic_case_summary": {
+            "patient_summary": patient_summary,
+            "clinical_question": clinical_question,
+            "summary_text": _summarize_text(clinical_question or json.dumps(patient_summary, ensure_ascii=False)),
+        },
+        "expert_opinions": expert_opinions,
+        "disputes": disputes,
+        "convergence_timeline": convergence_timeline,
+        "final_consensus": final_consensus,
+        "action_items": action_items,
+    }
+    return report
+
+
 def _candidate_openclaw_config_paths() -> list[Path]:
     home = Path.home()
     return [
@@ -840,9 +1085,11 @@ def list_recent_cases(limit: int = 20) -> dict[str, Any]:
 
 @app.post("/events")
 async def ingest_event(event: MDTEvent) -> dict[str, Any]:
-    body = _persist_event(event)
+    body, sentences = _persist_event_with_sentences(event)
     await ws_manager.broadcast({"type": "mdt_event", "data": body})
-    return {"accepted": True, "event": body}
+    for s in sentences:
+        await ws_manager.broadcast({"type": "mdt_event", "data": s})
+    return {"accepted": True, "event": body, "sentences": sentences}
 
 
 @app.get("/agents")
@@ -1006,8 +1253,10 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
         payload=human_payload,
         confidence=None,
     )
-    human_body = _persist_event(human_event)
+    human_body, human_sentences = _persist_event_with_sentences(human_event)
     await ws_manager.broadcast({"type": "mdt_event", "data": human_body})
+    for s in human_sentences:
+        await ws_manager.broadcast({"type": "mdt_event", "data": s})
 
     agents = _load_enabled_agents()
     lead_id = _choose_lead_expert(payload.message, payload.confirmed_sections, agents)
@@ -1041,9 +1290,11 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
             payload=lead_payload,
             confidence=0.78,
         )
-        body = _persist_event(ev)
+        body, sentences = _persist_event_with_sentences(ev)
         generated.append(body)
         await ws_manager.broadcast({"type": "mdt_event", "data": body})
+        for s in sentences:
+            await ws_manager.broadcast({"type": "mdt_event", "data": s})
 
     non_leads = [(a, s, l, m) for (a, s, l, m) in agents if a != lead_id]
     force_disagree_assigned = False
@@ -1093,9 +1344,11 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
             payload=opinion_payload,
             confidence=0.72 if stance == "disagree" else 0.8,
         )
-        body = _persist_event(ev)
+        body, sentences = _persist_event_with_sentences(ev)
         generated.append(body)
         await ws_manager.broadcast({"type": "mdt_event", "data": body})
+        for s in sentences:
+            await ws_manager.broadcast({"type": "mdt_event", "data": s})
 
     if disagreements:
         followup = MDTEvent(
@@ -1115,9 +1368,11 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
             },
             confidence=0.76,
         )
-        followup_body = _persist_event(followup)
+        followup_body, followup_sentences = _persist_event_with_sentences(followup)
         generated.append(followup_body)
         await ws_manager.broadcast({"type": "mdt_event", "data": followup_body})
+        for s in followup_sentences:
+            await ws_manager.broadcast({"type": "mdt_event", "data": s})
 
     total_nonlead = max(len(non_leads), 1)
     disagree_ratio = len(disagreements) / total_nonlead
@@ -1144,8 +1399,10 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
         },
         confidence=round(consensus_score, 3),
     )
-    orchestrator_body = _persist_event(orchestrator)
+    orchestrator_body, orchestrator_sentences = _persist_event_with_sentences(orchestrator)
     await ws_manager.broadcast({"type": "mdt_event", "data": orchestrator_body})
+    for s in orchestrator_sentences:
+        await ws_manager.broadcast({"type": "mdt_event", "data": s})
 
     return {
         "accepted": True,
@@ -1241,10 +1498,12 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
                 confidence=0.74 if stance == "oppose" else 0.84,
                 reply_to_event_id=target["event_id"],
             )
-            body = _persist_event(ev)
+            body, sentences = _persist_event_with_sentences(ev)
             round_generated_events.append(body)
             generated += 1
             await ws_manager.broadcast({"type": "mdt_event", "data": body})
+            for s in sentences:
+                await ws_manager.broadcast({"type": "mdt_event", "data": s})
 
         current_keys = _round_conflict_keys(payload.case_id, current_to)
         unified, detail = _check_unified(payload.case_id, current_to, round_conflicts, current_keys)
@@ -1275,8 +1534,10 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
             },
             confidence=consensus_score,
         )
-        progress_body = _persist_event(progress)
+        progress_body, progress_sentences = _persist_event_with_sentences(progress)
         await ws_manager.broadcast({"type": "mdt_event", "data": progress_body})
+        for s in progress_sentences:
+            await ws_manager.broadcast({"type": "mdt_event", "data": s})
         generated += 1
 
         if unified:
@@ -1302,9 +1563,11 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
                 confidence=max(0.9, consensus_score),
                 reply_to_event_id=progress_body.get("event_id"),
             )
-            final_body = _persist_event(final)
+            final_body, final_sentences = _persist_event_with_sentences(final)
             final_event_id = final_body.get("event_id")
             await ws_manager.broadcast({"type": "mdt_event", "data": final_body})
+            for s in final_sentences:
+                await ws_manager.broadcast({"type": "mdt_event", "data": s})
             generated += 1
             break
 
@@ -1381,27 +1644,14 @@ def case_conflicts(case_id: str) -> dict[str, Any]:
 
 @app.get("/cases/{case_id}/events")
 def list_case_events(case_id: str) -> dict[str, Any]:
-    with conn() as c:
-        rows = c.execute(
-            "select * from mdt_events where case_id=? order by event_id asc", (case_id,)
-        ).fetchall()
-    events = []
-    for r in rows:
-        events.append(
-            {
-                "event_id": r["event_id"],
-                "case_id": r["case_id"],
-                "round_no": r["round_no"],
-                "event_type": r["event_type"],
-                "speaker": r["speaker"],
-                "specialty": r["specialty"],
-                "payload": json.loads(r["payload"]),
-                "confidence": r["confidence"],
-                "reply_to_event_id": r["reply_to_event_id"],
-                "timestamp": r["timestamp"],
-            }
-        )
+    events = _load_case_events(case_id)
     return {"case_id": case_id, "count": len(events), "events": events}
+
+
+@app.get("/cases/{case_id}/report")
+def get_case_report(case_id: str) -> dict[str, Any]:
+    report = _build_case_report(case_id)
+    return {"case_id": case_id, "report": report}
 
 
 @app.websocket("/ws/events")
