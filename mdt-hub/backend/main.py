@@ -6,13 +6,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "mdt.db"
 
-app = FastAPI(title="MDT Hub API", version="0.2.0")
+app = FastAPI(title="MDT Hub API", version="0.3.0")
 
 
 class MDTEvent(BaseModel):
@@ -32,6 +32,13 @@ class CaseOpen(BaseModel):
     patient_summary: dict[str, Any]
     status: str = "active"
     danger_flag: bool = False
+
+
+class DiscussionInput(BaseModel):
+    case_id: str
+    round_no: int = Field(default=1, ge=1)
+    speaker: str = "human_clinician"
+    message: str
 
 
 class WSManager:
@@ -58,6 +65,15 @@ class WSManager:
 
 
 ws_manager = WSManager()
+
+
+SPECIALIST_PROFILES = [
+    ("mdt-id", "infectious_disease", "感染来源+抗菌覆盖策略"),
+    ("mdt-micro", "microbiology", "病原/标本质量与耐药解释"),
+    ("mdt-pharm", "clinical_pharmacy", "剂量与肾功能分层，药物相互作用"),
+    ("mdt-icu", "icu", "重症风险分层与支持治疗窗口"),
+    ("mdt-evidence", "evidence", "指南与文献证据分级"),
+]
 
 
 def conn() -> sqlite3.Connection:
@@ -99,12 +115,53 @@ def init_db() -> None:
         )
 
 
+def _ensure_case(case_id: str) -> None:
+    with conn() as c:
+        exists = c.execute("select case_id from cases where case_id=?", (case_id,)).fetchone()
+        if not exists:
+            c.execute(
+                "insert into cases(case_id,status,opened_at,patient_summary,danger_flag) values (?,?,?,?,0)",
+                (case_id, "active", datetime.now(timezone.utc).isoformat(), json.dumps({}, ensure_ascii=False)),
+            )
+
+
+def _persist_event(event: MDTEvent) -> dict[str, Any]:
+    _ensure_case(event.case_id)
+    with conn() as c:
+        cur = c.execute(
+            """
+            insert into mdt_events(case_id,round_no,event_type,speaker,specialty,payload,confidence,reply_to_event_id,timestamp)
+            values (?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                event.case_id,
+                event.round_no,
+                event.event_type,
+                event.speaker,
+                event.specialty,
+                json.dumps(event.payload, ensure_ascii=False),
+                event.confidence,
+                event.reply_to_event_id,
+                event.timestamp.isoformat(),
+            ),
+        )
+        event_id = cur.lastrowid
+    return {"event_id": event_id, **event.model_dump(mode="json")}
+
+
+def _latest_round(case_id: str) -> int:
+    with conn() as c:
+        row = c.execute("select max(round_no) as r from mdt_events where case_id=?", (case_id,)).fetchone()
+    return int(row["r"] or 0)
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
 
-# ensure table bootstrap for TestClient/offline scripts
+
 init_db()
+
 
 @app.get("/health")
 def health() -> dict[str, Any]:
@@ -133,42 +190,68 @@ def open_case(payload: CaseOpen) -> dict[str, Any]:
 
 @app.post("/events")
 async def ingest_event(event: MDTEvent) -> dict[str, Any]:
-    with conn() as c:
-        exists = c.execute(
-            "select case_id from cases where case_id=?", (event.case_id,)
-        ).fetchone()
-        if not exists:
-            c.execute(
-                "insert into cases(case_id,status,opened_at,patient_summary,danger_flag) values (?,?,?,?,0)",
-                (
-                    event.case_id,
-                    "active",
-                    datetime.now(timezone.utc).isoformat(),
-                    json.dumps({}, ensure_ascii=False),
-                ),
-            )
-        cur = c.execute(
-            """
-            insert into mdt_events(case_id,round_no,event_type,speaker,specialty,payload,confidence,reply_to_event_id,timestamp)
-            values (?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                event.case_id,
-                event.round_no,
-                event.event_type,
-                event.speaker,
-                event.specialty,
-                json.dumps(event.payload, ensure_ascii=False),
-                event.confidence,
-                event.reply_to_event_id,
-                event.timestamp.isoformat(),
-            ),
-        )
-        event_id = cur.lastrowid
-
-    body = {"event_id": event_id, **event.model_dump(mode="json")}
+    body = _persist_event(event)
     await ws_manager.broadcast({"type": "mdt_event", "data": body})
     return {"accepted": True, "event": body}
+
+
+@app.post("/discussion/submit")
+async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
+    """模拟现实 MDT：先录入临床医生发言，再按角色生成一轮专家回应。"""
+    round_no = payload.round_no or max(1, _latest_round(payload.case_id))
+
+    human_event = MDTEvent(
+        case_id=payload.case_id,
+        round_no=round_no,
+        event_type="discussion_message",
+        speaker=payload.speaker,
+        specialty="human",
+        payload={"text": payload.message},
+        confidence=None,
+    )
+    human_body = _persist_event(human_event)
+    await ws_manager.broadcast({"type": "mdt_event", "data": human_body})
+
+    generated: list[dict[str, Any]] = []
+    for agent_id, specialty, lens in SPECIALIST_PROFILES:
+        ev = MDTEvent(
+            case_id=payload.case_id,
+            round_no=round_no,
+            event_type="agent_opinion",
+            speaker=agent_id,
+            specialty=specialty,
+            payload={
+                "discussion": f"针对输入“{payload.message}”，从{lens}角度建议补充评估并形成可执行方案。",
+                "source": "simulated_role_response",
+            },
+            confidence=0.75,
+        )
+        body = _persist_event(ev)
+        generated.append(body)
+        await ws_manager.broadcast({"type": "mdt_event", "data": body})
+
+    orchestrator = MDTEvent(
+        case_id=payload.case_id,
+        round_no=round_no,
+        event_type="consensus_updated",
+        speaker="mdt-orchestrator",
+        specialty="mdt",
+        payload={
+            "status": "majority",
+            "summary": "已收集多学科观点，建议进入下一轮定向追问或定稿。",
+            "next_step": "targeted_round_or_finalize",
+        },
+        confidence=0.82,
+    )
+    orchestrator_body = _persist_event(orchestrator)
+    await ws_manager.broadcast({"type": "mdt_event", "data": orchestrator_body})
+
+    return {
+        "accepted": True,
+        "case_id": payload.case_id,
+        "round_no": round_no,
+        "generated_count": len(generated) + 1,
+    }
 
 
 @app.get("/cases/{case_id}/events")
