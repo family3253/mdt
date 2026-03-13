@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List, Dict, Tuple
+
+import requests
+
+
+def now_iso():
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def now_ts() -> int:
+    return int(datetime.now(tz=timezone.utc).timestamp())
+
+
+def parse_any_ts(v) -> int | None:
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        x = int(v)
+        if x > 10_000_000_000:  # ms
+            x //= 1000
+        return x
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None
+        try:
+            return parse_any_ts(float(s))
+        except Exception:
+            pass
+        try:
+            return int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
+        except Exception:
+            return None
+    return None
+
+
+def load_protect_list(path: str) -> set:
+    p = Path(path)
+    if not p.exists():
+        return set()
+    items = set()
+    for line in p.read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        items.add(s)
+    return items
+
+
+def aether_login(base: str, email: str, password: str) -> str:
+    r = requests.post(f"{base}/api/auth/login", json={"email": email, "password": password}, timeout=20)
+    r.raise_for_status()
+    return r.json()["access_token"]
+
+
+def get_gpt_keys(aether_base: str, token: str, provider_id: str, page_size: int = 200) -> List[Dict]:
+    h = {"Authorization": f"Bearer {token}"}
+    out: List[Dict] = []
+    page = 1
+    while True:
+        r = requests.get(
+            f"{aether_base}/api/admin/pool/{provider_id}/keys",
+            headers=h,
+            params={"page": page, "page_size": page_size},
+            timeout=60,
+        )
+        r.raise_for_status()
+        obj = r.json() if isinstance(r.json(), dict) else {}
+        arr = obj.get("keys", []) if isinstance(obj.get("keys", []), list) else []
+        out.extend(arr)
+        total = int(obj.get("total", len(out)))
+        if len(out) >= total or not arr:
+            break
+        page += 1
+    return out
+
+
+def list_cpa_codex_tokens(cpa_base: str, mgmt_key: str) -> List[Dict]:
+    h = {"Authorization": f"Bearer {mgmt_key}"}
+    r = requests.get(f"{cpa_base}/v0/management/auth-files", headers=h, timeout=60)
+    r.raise_for_status()
+    files = r.json().get("files", [])
+
+    out: List[Dict] = []
+    seen = set()
+    now = now_ts()
+
+    for f in files:
+        if (f.get("provider") != "codex" and f.get("type") != "codex") or f.get("disabled"):
+            continue
+        p = f.get("path")
+        if not p or not os.path.exists(p):
+            continue
+        try:
+            obj = json.loads(Path(p).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        rt = (obj.get("refresh_token") or "").strip()
+        email = (obj.get("email") or f.get("email") or f.get("account") or "").strip()
+        if not rt or rt in seen:
+            continue
+
+        exp_ts = parse_any_ts(obj.get("expires") or obj.get("expired") or obj.get("oauth_expires_at"))
+        # 只保留未过期（预留 10 分钟缓冲）
+        if exp_ts is not None and exp_ts <= now + 600:
+            continue
+
+        seen.add(rt)
+        out.append(
+            {
+                "email": email,
+                "refresh_token": rt,
+                "last_refresh": parse_any_ts(obj.get("last_refresh") or f.get("last_refresh")) or 0,
+                "expires_at": exp_ts,
+            }
+        )
+
+    # 最近刷新优先
+    out.sort(key=lambda x: int(x.get("last_refresh") or 0), reverse=True)
+    return out
+
+
+def should_cleanup_401(key: Dict) -> bool:
+    reason = str(key.get("oauth_invalid_reason") or "").lower()
+    if key.get("oauth_invalid_at"):
+        return True
+    patterns = ["401", "unauthorized", "invalid_token", "invalid token", "token expired", "invalid_grant"]
+    return any(p in reason for p in patterns)
+
+
+def delete_keys_batch(aether_base: str, token: str, provider_id: str, key_ids: List[str]) -> Dict:
+    h = {"Authorization": f"Bearer {token}"}
+    r = requests.post(
+        f"{aether_base}/api/admin/pool/{provider_id}/keys/batch-action",
+        headers=h,
+        json={"key_ids": key_ids, "action": "delete"},
+        timeout=60,
+    )
+    try:
+        body = r.json()
+    except Exception:
+        body = {"raw": r.text[:500]}
+    return {"status": r.status_code, "body": body}
+
+
+def batch_import(aether_base: str, token: str, provider_id: str, creds: List[Dict], proxy_node_id: str | None) -> Dict:
+    h = {"Authorization": f"Bearer {token}"}
+    payload = "\n".join([c["refresh_token"] for c in creds])
+    req = {"credentials": payload}
+    if proxy_node_id:
+        req["proxy_node_id"] = proxy_node_id
+
+    r = requests.post(
+        f"{aether_base}/api/admin/provider-oauth/providers/{provider_id}/batch-import",
+        headers=h,
+        json=req,
+        timeout=240,
+    )
+    try:
+        body = r.json()
+    except Exception:
+        body = {"raw": r.text[:1000]}
+    return {"status": r.status_code, "body": body}
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Aether GPT provider maintenance")
+    ap.add_argument("--cpa-base", default="http://127.0.0.1:8080")
+    ap.add_argument("--cpa-mgmt-key", required=True)
+    ap.add_argument("--aether-base", default="http://127.0.0.1:8084")
+    ap.add_argument("--aether-email", required=True)
+    ap.add_argument("--aether-password", required=True)
+    ap.add_argument("--provider-id", required=True)
+    ap.add_argument("--target-keys", type=int, default=30)
+    ap.add_argument("--protect-list", default="/home/chenyechao/.openclaw/workspace/configs/aether-gpt-protect-list.txt")
+    ap.add_argument("--proxy-node-id", default="")
+    ap.add_argument("--safe", action="store_true", help="safe mode: no deletion, capped import")
+    ap.add_argument("--import-limit", type=int, default=20)
+    ap.add_argument("--cleanup-limit", type=int, default=20)
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--log-file", default="/home/chenyechao/.openclaw/workspace/memory/aether-maintain-last.json")
+    args = ap.parse_args()
+
+    summary = {
+        "time": now_iso(),
+        "mode": {"dry_run": args.dry_run, "safe": args.safe},
+        "provider_id": args.provider_id,
+        "proxy_node_id": args.proxy_node_id or None,
+    }
+
+    token = aether_login(args.aether_base, args.aether_email, args.aether_password)
+    keys_before = get_gpt_keys(args.aether_base, token, args.provider_id)
+    summary["before_key_count"] = len(keys_before)
+
+    protect = load_protect_list(args.protect_list)
+    summary["protect_count"] = len(protect)
+
+    cleanup_candidates = []
+    for k in keys_before:
+        name = str(k.get("key_name") or k.get("name") or "").strip()
+        if name in protect:
+            continue
+        if should_cleanup_401(k):
+            cleanup_candidates.append({"id": k.get("key_id") or k.get("id"), "name": name})
+
+    cleanup_candidates = [c for c in cleanup_candidates if c.get("id")][: args.cleanup_limit]
+    summary["cleanup_candidates"] = len(cleanup_candidates)
+
+    cleanup_done = 0
+    if cleanup_candidates and not args.dry_run and not args.safe:
+        ids = [c["id"] for c in cleanup_candidates]
+        res = delete_keys_batch(args.aether_base, token, args.provider_id, ids)
+        cleanup_done = int((res.get("body") or {}).get("affected") or 0)
+        summary["cleanup_result"] = {"status": res.get("status"), "affected": cleanup_done}
+    summary["cleanup_executed"] = cleanup_done
+
+    keys_mid = get_gpt_keys(args.aether_base, token, args.provider_id)
+    need = max(0, args.target_keys - len(keys_mid))
+    if args.safe:
+        need = min(need, args.import_limit)
+    summary["refill_needed"] = need
+
+    all_tokens = list_cpa_codex_tokens(args.cpa_base, args.cpa_mgmt_key)
+    summary["cpa_codex_token_count"] = len(all_tokens)
+
+    existing_names = {str(k.get("key_name") or k.get("name") or "").strip() for k in keys_mid}
+    existing_emails = set()
+    for n in existing_names:
+        if "@" in n:
+            existing_emails.add(n)
+        if n.startswith("codex_") and "@" in n:
+            existing_emails.add(n.replace("codex_", "", 1))
+
+    selected = []
+    for item in all_tokens:
+        email = str(item.get("email") or "").strip()
+        if email and (email in existing_emails or email in protect):
+            continue
+        selected.append(item)
+        if len(selected) >= need:
+            break
+
+    summary["selected_for_import"] = len(selected)
+    summary["selected_accounts_sample"] = [x.get("email") for x in selected[:10]]
+
+    import_result = {"status": None, "total": 0, "success": 0, "failed": 0, "top_errors": []}
+    if need > 0 and selected and not args.dry_run:
+        r = batch_import(args.aether_base, token, args.provider_id, selected, args.proxy_node_id or None)
+        body = r.get("body", {}) if isinstance(r.get("body", {}), dict) else {}
+        errs = {}
+        for item in body.get("results", []):
+            if item.get("status") != "success":
+                em = item.get("error", "unknown")
+                errs[em] = errs.get(em, 0) + 1
+        import_result = {
+            "status": r.get("status"),
+            "total": body.get("total", 0),
+            "success": body.get("success", 0),
+            "failed": body.get("failed", 0),
+            "top_errors": sorted(errs.items(), key=lambda x: x[1], reverse=True)[:5],
+        }
+    summary["import"] = import_result
+
+    keys_after = get_gpt_keys(args.aether_base, token, args.provider_id)
+    summary["after_key_count"] = len(keys_after)
+    summary["delta_key_count"] = summary["after_key_count"] - summary["before_key_count"]
+
+    h = {"Authorization": f"Bearer {token}"}
+    mr = requests.get(f"{args.aether_base}/api/admin/providers/{args.provider_id}/models", headers=h, timeout=60)
+    models = mr.json() if mr.ok and isinstance(mr.json(), list) else []
+    summary["models"] = [m.get("provider_model_name") for m in models][:20]
+
+    Path(args.log_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.log_file).write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()
