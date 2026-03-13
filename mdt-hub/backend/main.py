@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -75,6 +76,28 @@ class CaseOpen(BaseModel):
     danger_flag: bool = False
 
 
+DEFAULT_ROUND1_TASK_TEMPLATE = "请先进一步明确诊断，结合切片复核原诊断是否准确，给出支持/反对证据、关键鉴别诊断、下一步最小必要检查。"
+DEFAULT_MDT_CHECKLIST = {
+    "case_completeness": "pending",
+    "evidence_sufficiency": "pending",
+    "differential_diagnosis": "pending",
+    "consensus_level": "pending",
+    "execution_followup_plan": "pending",
+}
+
+
+class CaseImportInput(BaseModel):
+    case_id: str
+    patient_summary: dict[str, Any] = Field(default_factory=dict)
+    source_case_url: Optional[str] = None
+    slide_urls: list[str] = Field(default_factory=list)
+    initial_diagnosis: Optional[str] = None
+    round1_task_template: Optional[str] = None
+    mdt_checklist: Optional[dict[str, Any]] = None
+    status: str = "active"
+    danger_flag: bool = False
+
+
 class ConfirmedSectionItem(BaseModel):
     text: str
     confirmed: bool = True
@@ -95,10 +118,24 @@ class DiscussionInput(BaseModel):
     enable_docs_context: bool = True
 
 
+class ParsedConfirmInput(BaseModel):
+    imaging: list[ConfirmedSectionItem] = Field(default_factory=list)
+    labs: list[ConfirmedSectionItem] = Field(default_factory=list)
+    medications: list[ConfirmedSectionItem] = Field(default_factory=list)
+    source_doc_id: Optional[int] = None
+    confirmed_by: Optional[str] = None
+
+
 class RoundReviewInput(BaseModel):
     case_id: str
     from_round: int = Field(default=1, ge=1)
     to_round: int = Field(default=2, ge=2)
+
+
+class ConflictResolutionInput(BaseModel):
+    conflict_graph: Optional[dict[str, Any]] = None
+    extra_context: Optional[str] = None
+    max_actions_per_conflict: int = Field(default=3, ge=1, le=3)
 
 
 class KnowledgeFeed(BaseModel):
@@ -289,7 +326,27 @@ def init_db() -> None:
             )
             """
         )
+        c.execute(
+            """
+            create table if not exists mdt_case_parsed_confirmations (
+              id integer primary key autoincrement,
+              case_id text not null,
+              imaging text not null,
+              labs text not null,
+              medications text not null,
+              source_doc_id integer,
+              confirmed_by text,
+              created_at text not null,
+              updated_at text not null
+            )
+            """
+        )
         _ensure_column(c, "mdt_agents", "model", "text")
+        _ensure_column(c, "cases", "source_case_url", "text")
+        _ensure_column(c, "cases", "slide_urls", "text")
+        _ensure_column(c, "cases", "initial_diagnosis", "text")
+        _ensure_column(c, "cases", "round1_task_template", "text")
+        _ensure_column(c, "cases", "mdt_checklist", "text")
 
         # 兼容旧库：若历史表缺少 model 列则在线补齐
         cols = [r[1] for r in c.execute("pragma table_info(mdt_agents)").fetchall()]
@@ -541,6 +598,49 @@ def _is_image_source(source: str) -> bool:
     return any(src.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"))
 
 
+def _normalize_confirmed_items(items: list[Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for item in items or []:
+        if isinstance(item, dict):
+            text = str(item.get("text") or "").strip()
+            confirmed = bool(item.get("confirmed", True))
+        else:
+            text = str(getattr(item, "text", "") or "").strip()
+            confirmed = bool(getattr(item, "confirmed", True))
+        if not text:
+            continue
+        out.append({"text": text, "confirmed": confirmed})
+    return out
+
+
+def _latest_confirmed_sections(case_id: str) -> Optional[dict[str, Any]]:
+    with conn() as c:
+        row = c.execute(
+            """
+            select id, imaging, labs, medications, source_doc_id, confirmed_by, created_at, updated_at
+            from mdt_case_parsed_confirmations
+            where case_id=?
+            order by id desc
+            limit 1
+            """,
+            (case_id,),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "source_doc_id": row["source_doc_id"],
+        "confirmed_by": row["confirmed_by"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "sections": {
+            "imaging": json.loads(row["imaging"] or "[]"),
+            "labs": json.loads(row["labs"] or "[]"),
+            "medications": json.loads(row["medications"] or "[]"),
+        },
+    }
+
+
 def _build_case_docs_context(case_id: str, limit: int = 3) -> dict[str, Any]:
     with conn() as c:
         rows = c.execute(
@@ -739,14 +839,77 @@ def _load_case_events(case_id: str) -> list[dict[str, Any]]:
     return events
 
 
+def _normalize_slide_urls(urls: list[str]) -> list[str]:
+    out: list[str] = []
+    seen = set()
+    for item in urls or []:
+        u = str(item or "").strip()
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        out.append(u)
+    return out
+
+
+def _normalize_mdt_checklist(raw: Optional[dict[str, Any]]) -> dict[str, Any]:
+    base = dict(DEFAULT_MDT_CHECKLIST)
+    if not isinstance(raw, dict):
+        return base
+    for k in base.keys():
+        v = raw.get(k)
+        if v is None:
+            continue
+        txt = str(v).strip()
+        if txt:
+            base[k] = txt
+    return base
+
+
+def _get_case_profile(case_id: str) -> dict[str, Any]:
+    with conn() as c:
+        row = c.execute(
+            """
+            select case_id, source_case_url, slide_urls, initial_diagnosis, round1_task_template, mdt_checklist
+            from cases where case_id=?
+            """,
+            (case_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="case not found")
+
+    slide_urls = _normalize_slide_urls(json.loads(row["slide_urls"] or "[]"))
+    checklist = _normalize_mdt_checklist(json.loads(row["mdt_checklist"] or "{}"))
+    template = (row["round1_task_template"] or "").strip() or DEFAULT_ROUND1_TASK_TEMPLATE
+    return {
+        "case_id": row["case_id"],
+        "source_case_url": row["source_case_url"],
+        "slide_urls": slide_urls,
+        "initial_diagnosis": row["initial_diagnosis"],
+        "round1_task_template": template,
+        "mdt_checklist": checklist,
+    }
+
+
 def _build_case_report(case_id: str) -> dict[str, Any]:
     with conn() as c:
-        row = c.execute("select case_id, opened_at, closed_at, patient_summary, status from cases where case_id=?", (case_id,)).fetchone()
+        row = c.execute(
+            """
+            select case_id, opened_at, closed_at, patient_summary, status,
+                   source_case_url, slide_urls, initial_diagnosis, round1_task_template, mdt_checklist
+            from cases where case_id=?
+            """,
+            (case_id,),
+        ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="case not found")
 
     events = _load_case_events(case_id)
     patient_summary = json.loads(row["patient_summary"] or "{}")
+    source_case_url = row["source_case_url"]
+    slide_urls = _normalize_slide_urls(json.loads(row["slide_urls"] or "[]"))
+    initial_diagnosis = row["initial_diagnosis"]
+    round1_task_template = (row["round1_task_template"] or "").strip() or DEFAULT_ROUND1_TASK_TEMPLATE
+    mdt_checklist = _normalize_mdt_checklist(json.loads(row["mdt_checklist"] or "{}"))
     discussion_events = [e for e in events if e["event_type"] == "discussion_message"]
     latest_discussion = discussion_events[-1] if discussion_events else None
     clinical_question = ""
@@ -864,14 +1027,159 @@ def _build_case_report(case_id: str) -> dict[str, Any]:
             "patient_summary": patient_summary,
             "clinical_question": clinical_question,
             "summary_text": _summarize_text(clinical_question or json.dumps(patient_summary, ensure_ascii=False)),
+            "source_case_url": source_case_url,
+            "slide_urls": slide_urls,
+            "initial_diagnosis": initial_diagnosis,
+            "round1_task_template": round1_task_template,
         },
         "expert_opinions": expert_opinions,
         "disputes": disputes,
         "convergence_timeline": convergence_timeline,
         "final_consensus": final_consensus,
+        "mdt_checklist": mdt_checklist,
         "action_items": action_items,
     }
     return report
+
+
+def _collect_unique_risks(events: list[dict[str, Any]], final_consensus: dict[str, Any]) -> list[str]:
+    risks: list[str] = []
+    for r in final_consensus.get("risks") or []:
+        txt = str(r).strip()
+        if txt and txt not in risks:
+            risks.append(txt)
+    for ev in events:
+        payload = ev.get("payload") or {}
+        src = payload.get("risks")
+        if isinstance(src, str):
+            src = [src]
+        for r in (src or []):
+            txt = str(r).strip()
+            if txt and txt not in risks:
+                risks.append(txt)
+            if len(risks) >= 8:
+                return risks
+    return risks
+
+
+def _build_case_minutes(case_id: str) -> dict[str, Any]:
+    report = _build_case_report(case_id)
+    events = _load_case_events(case_id)
+
+    participants_map: dict[str, dict[str, Any]] = {}
+    for ev in events:
+        speaker = str(ev.get("speaker") or "").strip()
+        if not speaker:
+            continue
+        if speaker not in participants_map:
+            participants_map[speaker] = {
+                "speaker": speaker,
+                "specialty": ev.get("specialty"),
+                "first_round": ev.get("round_no"),
+                "event_count": 0,
+            }
+        participants_map[speaker]["event_count"] += 1
+        if not participants_map[speaker].get("specialty") and ev.get("specialty"):
+            participants_map[speaker]["specialty"] = ev.get("specialty")
+    participants = sorted(participants_map.values(), key=lambda x: x["speaker"])
+
+    key_disputes = []
+    for d in report.get("disputes") or []:
+        line = f"R{d.get('round_no')}: {d.get('speaker')} - {d.get('summary') or ''}".strip()
+        if line and line not in key_disputes:
+            key_disputes.append(line)
+    if not key_disputes:
+        key_disputes.append("本次会诊未记录显著争议。")
+
+    final_consensus = report.get("final_consensus") or {}
+    checklist = _normalize_mdt_checklist(report.get("mdt_checklist"))
+    final_consensus_items = []
+    if final_consensus.get("summary"):
+        final_consensus_items.append(str(final_consensus.get("summary")))
+    for k in ("assessment", "actions"):
+        for x in (final_consensus.get(k) or []):
+            txt = str(x).strip()
+            if txt and txt not in final_consensus_items:
+                final_consensus_items.append(txt)
+    if not final_consensus_items:
+        final_consensus_items = ["尚未形成最终共识，建议继续迭代复盘。"]
+
+    execution_suggestions = []
+    for x in report.get("action_items") or []:
+        txt = str(x).strip()
+        if txt and txt not in execution_suggestions:
+            execution_suggestions.append(txt)
+    if not execution_suggestions:
+        execution_suggestions = ["按当前阶段共识执行并在 24h 内复评。"]
+
+    risks_and_followup = _collect_unique_risks(events, final_consensus)
+    if not risks_and_followup:
+        risks_and_followup = ["持续监测生命体征与关键实验室指标，出现恶化及时升级会诊。"]
+
+    timeline_summary = []
+    for t in report.get("convergence_timeline") or []:
+        timeline_summary.append(
+            f"R{t.get('round_no')} {t.get('event_type')}: {t.get('summary') or ''} (score={t.get('consensus_score') or '-'})"
+        )
+    if not timeline_summary:
+        for ev in events:
+            if ev.get("event_type") in ("discussion_message", "lead_opinion", "agent_review", "final_consensus"):
+                payload = ev.get("payload") or {}
+                txt = _summarize_text(payload.get("summary") or payload.get("discussion") or payload.get("review") or payload.get("text") or "", 120)
+                timeline_summary.append(f"R{ev.get('round_no')} {ev.get('event_type')}: {txt}")
+    timeline_summary = timeline_summary[:12] or ["暂无时间线数据。"]
+
+    basic = report.get("basic_case_summary") or {}
+    minutes_sections = {
+        "basic_info": {
+            "case_id": case_id,
+            "opened_at": report.get("opened_at"),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "case_status": report.get("case_status"),
+            "clinical_question": basic.get("clinical_question") or "",
+            "patient_summary": basic.get("patient_summary") or {},
+        },
+        "key_disputes": key_disputes,
+        "final_consensus": final_consensus_items,
+        "execution_suggestions": execution_suggestions[:10],
+        "risks_and_followup": risks_and_followup[:10],
+        "mdt_checklist": [
+            f"病例完整性: {checklist.get('case_completeness')}",
+            f"影像/病理证据充分性: {checklist.get('evidence_sufficiency')}",
+            f"鉴别诊断: {checklist.get('differential_diagnosis')}",
+            f"共识等级: {checklist.get('consensus_level')}",
+            f"执行与随访计划: {checklist.get('execution_followup_plan')}",
+        ],
+        "timeline_summary": timeline_summary,
+        "participants": participants,
+    }
+
+    source_event_ids = [int(e.get("event_id")) for e in events if e.get("event_id") is not None]
+    stable_source = {
+        "case_id": case_id,
+        "event_ids": source_event_ids,
+        "sections": {
+            "key_disputes": minutes_sections["key_disputes"],
+            "final_consensus": minutes_sections["final_consensus"],
+            "execution_suggestions": minutes_sections["execution_suggestions"],
+            "risks_and_followup": minutes_sections["risks_and_followup"],
+            "mdt_checklist": minutes_sections["mdt_checklist"],
+            "timeline_summary": minutes_sections["timeline_summary"],
+            "participants": [{"speaker": p["speaker"], "specialty": p.get("specialty")} for p in participants],
+        },
+    }
+    content_fingerprint = hashlib.sha1(
+        json.dumps(stable_source, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+    return {
+        "case_id": case_id,
+        "generated_at": minutes_sections["basic_info"]["generated_at"],
+        "content_fingerprint": content_fingerprint,
+        "source_event_count": len(source_event_ids),
+        "source_event_ids": source_event_ids,
+        "minutes": minutes_sections,
+    }
 
 
 def _candidate_openclaw_config_paths() -> list[Path]:
@@ -1065,6 +1373,79 @@ def open_case(payload: CaseOpen) -> dict[str, Any]:
     return {"ok": True, "case_id": payload.case_id, "opened_at": opened_at, "already_exists": False}
 
 
+@app.post("/cases/import")
+def import_case(payload: CaseImportInput) -> dict[str, Any]:
+    opened_at = datetime.now(timezone.utc).isoformat()
+    slide_urls = _normalize_slide_urls(payload.slide_urls)
+    task_template = (payload.round1_task_template or "").strip() or DEFAULT_ROUND1_TASK_TEMPLATE
+    checklist = _normalize_mdt_checklist(payload.mdt_checklist)
+
+    with conn() as c:
+        existed = c.execute("select case_id, opened_at, patient_summary from cases where case_id=?", (payload.case_id,)).fetchone()
+        if existed:
+            merged_summary = json.loads(existed["patient_summary"] or "{}")
+            merged_summary.update(payload.patient_summary or {})
+            c.execute(
+                """
+                update cases
+                set patient_summary=?, source_case_url=?, slide_urls=?, initial_diagnosis=?, round1_task_template=?, mdt_checklist=?, status=?, danger_flag=?
+                where case_id=?
+                """,
+                (
+                    json.dumps(merged_summary, ensure_ascii=False),
+                    (payload.source_case_url or "").strip() or None,
+                    json.dumps(slide_urls, ensure_ascii=False),
+                    (payload.initial_diagnosis or "").strip() or None,
+                    task_template,
+                    json.dumps(checklist, ensure_ascii=False),
+                    payload.status,
+                    1 if payload.danger_flag else 0,
+                    payload.case_id,
+                ),
+            )
+            already_exists = True
+            opened_at = existed["opened_at"]
+        else:
+            c.execute(
+                """
+                insert into cases(
+                  case_id,status,opened_at,patient_summary,danger_flag,
+                  source_case_url,slide_urls,initial_diagnosis,round1_task_template,mdt_checklist
+                ) values (?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    payload.case_id,
+                    payload.status,
+                    opened_at,
+                    json.dumps(payload.patient_summary, ensure_ascii=False),
+                    1 if payload.danger_flag else 0,
+                    (payload.source_case_url or "").strip() or None,
+                    json.dumps(slide_urls, ensure_ascii=False),
+                    (payload.initial_diagnosis or "").strip() or None,
+                    task_template,
+                    json.dumps(checklist, ensure_ascii=False),
+                ),
+            )
+            already_exists = False
+
+    return {
+        "ok": True,
+        "case_id": payload.case_id,
+        "opened_at": opened_at,
+        "already_exists": already_exists,
+        "source_case_url": (payload.source_case_url or "").strip() or None,
+        "slide_urls": slide_urls,
+        "initial_diagnosis": (payload.initial_diagnosis or "").strip() or None,
+        "round1_task_template": task_template,
+        "mdt_checklist": checklist,
+    }
+
+
+@app.get("/cases/{case_id}/profile")
+def get_case_profile(case_id: str) -> dict[str, Any]:
+    return _get_case_profile(case_id)
+
+
 @app.get("/cases/recent")
 def list_recent_cases(limit: int = 20) -> dict[str, Any]:
     cap = max(1, min(int(limit or 20), 100))
@@ -1222,6 +1603,7 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
     round_no = payload.round_no or max(1, _latest_round(payload.case_id))
 
     confirmed_sections = payload.confirmed_sections.model_dump(mode="json") if payload.confirmed_sections else None
+    case_profile = _get_case_profile(payload.case_id)
     docs_context = _build_case_docs_context(payload.case_id) if payload.enable_docs_context else {
         "case_id": payload.case_id,
         "doc_count": 0,
@@ -1231,15 +1613,24 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
     }
     case_fragments = _collect_case_fragments(payload.confirmed_sections, docs_context)
 
+    round1_template = case_profile.get("round1_task_template") or DEFAULT_ROUND1_TASK_TEMPLATE
+    effective_message = payload.message
+    if round_no == 1:
+        effective_message = f"{round1_template}\n\n临床补充：{payload.message}"
+
     human_payload: dict[str, Any] = {
-        "text": payload.message,
-        "assessment": [payload.message],
+        "text": effective_message,
+        "assessment": [effective_message],
         "actions": [],
         "risks": [],
         "questions": [],
         "stance": "clinical_question",
         "references": case_fragments[:3],
         "docs_context": docs_context,
+        "round1_task_template": round1_template,
+        "source_case_url": case_profile.get("source_case_url"),
+        "slide_urls": case_profile.get("slide_urls") or [],
+        "initial_diagnosis": case_profile.get("initial_diagnosis"),
     }
     if confirmed_sections:
         human_payload["confirmed_sections"] = confirmed_sections
@@ -1259,8 +1650,8 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
         await ws_manager.broadcast({"type": "mdt_event", "data": s})
 
     agents = _load_enabled_agents()
-    lead_id = _choose_lead_expert(payload.message, payload.confirmed_sections, agents)
-    lead_points = _extract_key_points(payload.message, case_fragments)
+    lead_id = _choose_lead_expert(effective_message, payload.confirmed_sections, agents)
+    lead_points = _extract_key_points(effective_message, case_fragments)
 
     generated: list[dict[str, Any]] = []
     disagreements: list[str] = []
@@ -1299,7 +1690,7 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
     non_leads = [(a, s, l, m) for (a, s, l, m) in agents if a != lead_id]
     force_disagree_assigned = False
     for idx, (agent_id, specialty, lens, agent_model) in enumerate(non_leads):
-        should_disagree = (not force_disagree_assigned and idx == 0) or ("micro" in specialty and "耐药" in payload.message)
+        should_disagree = (not force_disagree_assigned and idx == 0) or ("micro" in specialty and "耐药" in effective_message)
         stance = "disagree" if should_disagree else "agree"
         if should_disagree:
             force_disagree_assigned = True
@@ -1331,7 +1722,7 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
             "docs_context": docs_context,
             "confirmed_sections": confirmed_sections,
             "case_context": {
-                "message": payload.message,
+                "message": effective_message,
                 "doc_refs": [d.get("doc_id") for d in docs_context.get("latest_docs", [])],
             },
         }
@@ -1416,6 +1807,8 @@ async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
         "docs_context_enabled": payload.enable_docs_context,
         "docs_context_doc_count": docs_context.get("doc_count", 0),
         "docs_context_has_image_doc": docs_context.get("has_image_doc", False),
+        "round1_task_template": round1_template,
+        "round1_template_injected": bool(round_no == 1),
     }
 
 
@@ -1591,6 +1984,80 @@ async def discussion_review(payload: RoundReviewInput) -> dict[str, Any]:
     }
 
 
+@app.get("/cases/{case_id}/parsed")
+def get_case_parsed(case_id: str) -> dict[str, Any]:
+    with conn() as c:
+        doc_row = c.execute(
+            "select id, sections, source, created_at from mdt_case_docs where case_id=? order by id desc limit 1",
+            (case_id,),
+        ).fetchone()
+
+    latest_doc = None
+    extracted_sections = {"imaging": [], "labs": [], "medications": []}
+    if doc_row:
+        extracted_sections = json.loads(doc_row["sections"] or "{}") or extracted_sections
+        latest_doc = {
+            "doc_id": doc_row["id"],
+            "source": doc_row["source"],
+            "created_at": doc_row["created_at"],
+        }
+
+    for key in ("imaging", "labs", "medications"):
+        extracted_sections[key] = _normalize_confirmed_items(
+            [{"text": x, "confirmed": True} for x in (extracted_sections.get(key) or [])]
+        )
+
+    confirmed = _latest_confirmed_sections(case_id)
+    effective = confirmed["sections"] if confirmed else extracted_sections
+
+    return {
+        "case_id": case_id,
+        "latest_doc": latest_doc,
+        "extracted_sections": extracted_sections,
+        "confirmed_sections": (confirmed or {}).get("sections") if confirmed else None,
+        "effective_sections": effective,
+        "confirmation": confirmed,
+    }
+
+
+@app.post("/cases/{case_id}/parsed/confirm")
+def confirm_case_parsed(case_id: str, payload: ParsedConfirmInput) -> dict[str, Any]:
+    _ensure_case(case_id)
+    now = datetime.now(timezone.utc).isoformat()
+
+    imaging = _normalize_confirmed_items(payload.imaging)
+    labs = _normalize_confirmed_items(payload.labs)
+    medications = _normalize_confirmed_items(payload.medications)
+
+    with conn() as c:
+        cur = c.execute(
+            """
+            insert into mdt_case_parsed_confirmations(
+              case_id, imaging, labs, medications, source_doc_id, confirmed_by, created_at, updated_at
+            ) values (?,?,?,?,?,?,?,?)
+            """,
+            (
+                case_id,
+                json.dumps(imaging, ensure_ascii=False),
+                json.dumps(labs, ensure_ascii=False),
+                json.dumps(medications, ensure_ascii=False),
+                payload.source_doc_id,
+                (payload.confirmed_by or "").strip() or None,
+                now,
+                now,
+            ),
+        )
+        confirm_id = cur.lastrowid
+
+    return {
+        "ok": True,
+        "case_id": case_id,
+        "confirmation_id": confirm_id,
+        "sections": {"imaging": imaging, "labs": labs, "medications": medications},
+        "saved_at": now,
+    }
+
+
 @app.get("/cases/{case_id}/documents")
 def list_case_docs(case_id: str) -> dict[str, Any]:
     with conn() as c:
@@ -1607,7 +2074,135 @@ def list_case_docs(case_id: str) -> dict[str, Any]:
             "sections": json.loads(r["sections"] or "{}"),
             "created_at": r["created_at"],
         })
-    return {"case_id": case_id, "count": len(docs), "documents": docs}
+    return {
+        "case_id": case_id,
+        "count": len(docs),
+        "documents": docs,
+        "latest_confirmation": _latest_confirmed_sections(case_id),
+    }
+
+
+def _derive_conflict_items(case_id: str, conflict_graph: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
+    if conflict_graph is None:
+        conflict_graph = case_conflicts(case_id)
+
+    with conn() as c:
+        review_rows = c.execute(
+            """
+            select event_id, round_no, speaker, payload
+            from mdt_events
+            where case_id=? and event_type='agent_review'
+            order by event_id asc
+            """,
+            (case_id,),
+        ).fetchall()
+        opinion_rows = c.execute(
+            """
+            select event_id, round_no, speaker, payload
+            from mdt_events
+            where case_id=? and event_type='agent_opinion'
+            order by event_id asc
+            """,
+            (case_id,),
+        ).fetchall()
+
+    conflicts: list[dict[str, Any]] = []
+
+    for r in review_rows:
+        payload = json.loads(r["payload"] or "{}")
+        stance = str(payload.get("stance") or "").lower()
+        if stance not in ("oppose", "disagree"):
+            continue
+        target_points = payload.get("target_points") or []
+        if isinstance(target_points, str):
+            target_points = [target_points]
+        dispute_point = str(target_points[0]).strip() if target_points else (payload.get("review") or "方案存在冲突")
+        target_speaker = payload.get("target_speaker") or "unknown"
+        evidence_diff = payload.get("review") or "对既有路径存在异议，需补证据后裁决"
+        priority = "high" if r["round_no"] and int(r["round_no"]) <= 2 else "medium"
+        confidence = 0.84 if priority == "high" else 0.72
+        conflicts.append(
+            {
+                "conflict_id": f"review-{r['event_id']}",
+                "source": "agent_review",
+                "round_no": r["round_no"],
+                "dispute_point": _summarize_text(dispute_point, 140),
+                "involved_experts": sorted({r["speaker"], target_speaker}),
+                "evidence_diff": _summarize_text(evidence_diff, 220),
+                "priority": priority,
+                "confidence": confidence,
+                "event_id": r["event_id"],
+            }
+        )
+
+    for r in opinion_rows:
+        payload = json.loads(r["payload"] or "{}")
+        stance = str(payload.get("stance") or "").lower()
+        if stance not in ("disagree", "oppose"):
+            continue
+        refs = payload.get("references") or []
+        if isinstance(refs, str):
+            refs = [refs]
+        dispute_point = (refs[0] if refs else "与牵头方案存在分歧")
+        evidence_diff = payload.get("discussion") or payload.get("assessment") or "当前证据不足以支持直接执行"
+        if isinstance(evidence_diff, list):
+            evidence_diff = "；".join([str(x) for x in evidence_diff[:2]])
+        involved = {r["speaker"], "mdt-orchestrator"}
+        conflicts.append(
+            {
+                "conflict_id": f"opinion-{r['event_id']}",
+                "source": "agent_opinion",
+                "round_no": r["round_no"],
+                "dispute_point": _summarize_text(str(dispute_point), 140),
+                "involved_experts": sorted(involved),
+                "evidence_diff": _summarize_text(str(evidence_diff), 220),
+                "priority": "medium",
+                "confidence": 0.7,
+                "event_id": r["event_id"],
+            }
+        )
+
+    # 去重：同轮次+争议点
+    uniq: list[dict[str, Any]] = []
+    seen_keys = set()
+    for item in sorted(conflicts, key=lambda x: (x.get("round_no") or 0, x.get("event_id") or 0)):
+        key = (item.get("round_no"), item.get("dispute_point"))
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        uniq.append(item)
+
+    return uniq
+
+
+def _build_resolution_actions(conflict: dict[str, Any], max_actions: int = 3) -> list[dict[str, Any]]:
+    involved = conflict.get("involved_experts") or []
+    primary_owner = involved[0] if involved else "mdt-orchestrator"
+    secondary_owner = involved[1] if len(involved) > 1 else "mdt-orchestrator"
+    dispute_point = conflict.get("dispute_point") or "冲突点"
+    evidence_diff = conflict.get("evidence_diff") or "证据口径不一致"
+
+    candidates = [
+        {
+            "action_type": "collect_evidence",
+            "owner": secondary_owner,
+            "deadline_hint": "24h",
+            "rationale": f"围绕“{dispute_point}”补齐关键证据，缩小分歧：{evidence_diff}",
+        },
+        {
+            "action_type": "orchestrator_adjudication",
+            "owner": "mdt-orchestrator",
+            "deadline_hint": "next_round",
+            "rationale": "由主持人组织定向复盘，要求双方按统一模板给出可验证依据与反证。",
+        },
+        {
+            "action_type": "execute_guardrail_plan",
+            "owner": primary_owner,
+            "deadline_hint": "immediate",
+            "rationale": "在最终裁决前执行低风险保护性动作，避免等待导致病情窗口丢失。",
+        },
+    ]
+    return candidates[: max(1, min(max_actions, 3))]
 
 
 @app.get("/cases/{case_id}/conflicts")
@@ -1642,6 +2237,61 @@ def case_conflicts(case_id: str) -> dict[str, Any]:
     return {"case_id": case_id, "nodes": list(nodes.values()), "edges": edges, "count": len(edges)}
 
 
+@app.post("/cases/{case_id}/conflict-resolution")
+def generate_conflict_resolution(case_id: str, payload: ConflictResolutionInput) -> dict[str, Any]:
+    _ensure_case(case_id)
+    graph = payload.conflict_graph or case_conflicts(case_id)
+    conflicts = _derive_conflict_items(case_id, graph)
+
+    if not conflicts:
+        return {
+            "case_id": case_id,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "has_conflict": False,
+            "message": "当前未检测到待裁决冲突，可直接执行既有共识并持续监测。",
+            "conflicts": [],
+            "recommendations": [],
+            "priority": "none",
+            "confidence": 0.95,
+            "meta": {
+                "input_edge_count": len((graph or {}).get("edges") or []),
+                "extra_context_used": bool((payload.extra_context or "").strip()),
+            },
+        }
+
+    recommendations = []
+    for cf in conflicts:
+        rec = {
+            "conflict_id": cf.get("conflict_id"),
+            "dispute_point": cf.get("dispute_point"),
+            "priority": cf.get("priority", "medium"),
+            "confidence": cf.get("confidence", 0.7),
+            "actions": _build_resolution_actions(cf, payload.max_actions_per_conflict),
+        }
+        if (payload.extra_context or "").strip():
+            rec["context_note"] = _summarize_text(payload.extra_context or "", 180)
+        recommendations.append(rec)
+
+    priority_rank = {"high": 3, "medium": 2, "low": 1}
+    global_priority = max((cf.get("priority", "medium") for cf in conflicts), key=lambda x: priority_rank.get(x, 0))
+    global_confidence = round(sum([float(cf.get("confidence", 0.7)) for cf in conflicts]) / max(len(conflicts), 1), 3)
+
+    return {
+        "case_id": case_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "has_conflict": True,
+        "conflicts": conflicts,
+        "recommendations": recommendations,
+        "priority": global_priority,
+        "confidence": global_confidence,
+        "meta": {
+            "conflict_count": len(conflicts),
+            "input_edge_count": len((graph or {}).get("edges") or []),
+            "extra_context_used": bool((payload.extra_context or "").strip()),
+        },
+    }
+
+
 @app.get("/cases/{case_id}/events")
 def list_case_events(case_id: str) -> dict[str, Any]:
     events = _load_case_events(case_id)
@@ -1652,6 +2302,12 @@ def list_case_events(case_id: str) -> dict[str, Any]:
 def get_case_report(case_id: str) -> dict[str, Any]:
     report = _build_case_report(case_id)
     return {"case_id": case_id, "report": report}
+
+
+@app.get("/cases/{case_id}/minutes")
+def get_case_minutes(case_id: str) -> dict[str, Any]:
+    minutes = _build_case_minutes(case_id)
+    return {"case_id": case_id, "minutes": minutes}
 
 
 @app.websocket("/ws/events")

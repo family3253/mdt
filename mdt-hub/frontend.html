@@ -149,6 +149,8 @@
     .report-panel h4 { margin: 8px 0 6px; font-size: 14px; color: #dce8ff; }
     .report-list { margin: 0; padding-left: 16px; }
     .report-card { border: 1px solid #2a375f; border-radius: 10px; padding: 10px; background: rgba(10,16,32,.7); margin-bottom: 10px; }
+    .minutes-section { border: 1px solid #324069; border-radius: 10px; padding: 10px; margin-bottom: 10px; background: rgba(9,14,28,.78); }
+    .minutes-section h5 { margin: 0 0 6px; font-size: 13px; color: #cfe0ff; }
 
     .section-col { border: 1px solid #2a375f; border-radius: 10px; padding: 8px; background: #0f152a; min-height: 220px; }
     .section-col h4 { margin: 0 0 8px; font-size: 14px; color: #dce8ff; }
@@ -271,8 +273,16 @@
 
       <div class="panel">
         <b data-i18n="uploadCaseTitle">上传病历（文件/网址）</b>
+        <input id="sourceCaseUrl" data-i18n-ph="sourceCaseUrlPlaceholder" placeholder="原始病例来源 URL" />
+        <textarea id="slideUrls" data-i18n-ph="slideUrlsPlaceholder" placeholder="切片 URL（每行一个）"></textarea>
+        <input id="initialDiagnosis" data-i18n-ph="initialDiagnosisPlaceholder" placeholder="初始诊断" />
+        <textarea id="round1TaskTemplate" data-i18n-ph="round1TaskTemplatePlaceholder" placeholder="首轮任务模板"></textarea>
         <input id="caseDocUrl" data-i18n-ph="caseDocUrlPlaceholder" placeholder="病历网址（支持网页/PDF链接）" />
         <input id="caseDocFile" type="file" />
+        <div class="btn-row">
+          <button class="btn-secondary" onclick="saveCaseImportProfile()" data-i18n="saveImportProfile">保存导入信息</button>
+          <button class="btn-secondary" onclick="loadCaseImportProfile()" data-i18n="loadImportProfile">加载导入信息</button>
+        </div>
         <div class="btn-row">
           <button class="btn-secondary" onclick="uploadCaseDocUrl()" data-i18n="importCaseUrl">导入网址病历</button>
           <button class="btn-secondary" onclick="uploadCaseDocFile()" data-i18n="uploadCaseFile">上传病历文件</button>
@@ -302,7 +312,8 @@
             <button class="mini-btn btn-secondary" onclick="addSectionItem('medications')" data-i18n="addMeds">+ 新增用药条目</button>
           </div>
         </div>
-        <div class="btn-row" style="margin-top:8px;">
+        <div class="btn-row" style="margin-top:8px; grid-template-columns: 1fr 1fr 1fr;">
+          <button class="btn-primary" onclick="confirmParsedSections()" data-i18n="confirmParsed">确认写回</button>
           <button class="btn-secondary" onclick="loadLatestParsedSections()" data-i18n="loadLatestParsed">加载最近解析结果</button>
           <button class="btn-secondary" onclick="resetSectionPanel()" data-i18n="clearPanel">清空面板</button>
         </div>
@@ -372,6 +383,13 @@
             <div id="conflictChart" class="chart"></div>
           </div>
         </div>
+        <div class="panel">
+          <div class="btn-row" style="grid-template-columns: auto 1fr; align-items: center;">
+            <button class="btn-primary" style="width:auto;" onclick="generateConflictResolution()" data-i18n="genConflictResolution">生成冲突裁决建议</button>
+            <div class="muted" id="conflictResolutionMeta">-</div>
+          </div>
+          <div id="conflictResolutionBody" class="report-panel" style="margin-top:10px;"></div>
+        </div>
       </section>
 
       <section id="view-report" class="view">
@@ -383,6 +401,14 @@
           <div class="muted" id="reportMeta" style="margin-top:8px;">-</div>
           <div id="reportBody" class="report-panel" style="margin-top:10px;"></div>
         </div>
+        <div class="panel">
+          <div class="btn-row">
+            <button class="btn-primary" onclick="loadCaseMinutes()" data-i18n="generateMinutes">一键生成纪要</button>
+            <button class="btn-secondary" onclick="exportMinutesPdf()" data-i18n="exportMinutesPdf">导出PDF</button>
+          </div>
+          <div class="muted" id="minutesMeta" style="margin-top:8px;">-</div>
+          <div id="minutesBody" class="report-panel" style="margin-top:10px;"></div>
+        </div>
       </section>
     </main>
   </div>
@@ -393,14 +419,14 @@
         pageTitle: 'MDT 会诊控制台', headerTitle: 'MDT 控制台', wsConnecting: '连接中...', statusWaiting: '等待操作',
         diagTitle: '连接诊断', retryModels: '重试加载模型', retryAgents: '重试加载 Agent',
         consultInput: '会诊输入', msgPlaceholder: '输入临床问题...', refreshCases: '刷新病例', useSelectedCase: '切换到所选病例', enableDocs: '启用病历直读上下文', submitDiscussion: '提交讨论', reviewRound: '二轮互评', refreshConflict: '刷新冲突图',
-        uploadCaseTitle: '上传病历（文件/网址）', caseDocUrlPlaceholder: '病历网址（支持网页/PDF链接）', importCaseUrl: '导入网址病历', uploadCaseFile: '上传病历文件',
+        uploadCaseTitle: '上传病历（文件/网址）', sourceCaseUrlPlaceholder: '原始病例来源 URL', slideUrlsPlaceholder: '切片 URL（每行一个）', initialDiagnosisPlaceholder: '初始诊断', round1TaskTemplatePlaceholder: '首轮任务模板（可编辑）', saveImportProfile: '保存导入信息', loadImportProfile: '加载导入信息', caseDocUrlPlaceholder: '病历网址（支持网页/PDF链接）', importCaseUrl: '导入网址病历', uploadCaseFile: '上传病历文件',
         parsedPanelTitle: '病历解析结果面板（可编辑确认）', parsedPanelHint: '提交会诊前可确认/采纳影像、检验、用药条目',
         imaging: '影像', labs: '检验', medications: '用药', addImaging: '+ 新增影像条目', addLabs: '+ 新增检验条目', addMeds: '+ 新增用药条目',
-        loadLatestParsed: '加载最近解析结果', clearPanel: '清空面板',
+        confirmParsed: '确认写回', loadLatestParsed: '加载最近解析结果', clearPanel: '清空面板',
         addAgentTitle: '新增 Agent', newAgentRolePlaceholder: '角色 e.g. 影像评估', newAgentPromptPlaceholder: '可选：自定义补充提示词', create: '新增',
         feedKnowledgeTitle: '喂知识（文本/文件/网址）', feedContentPlaceholder: '粘贴指南/经验知识...', feedUrlPlaceholder: '知识网址（网页/PDF）', injectText: '注入文本', injectUrl: '注入网址', injectFile: '注入文件',
         agentModelTitle: 'Agent 模型配置', agentsLoading: '当前 Agent: loading...',
-        tabRoom: '会诊室视图', tabAnalytics: '数据分析视图', tabReport: '会诊报告', timelineTitle: '实时时间线', speakerDist: '专家发言分布', consensusCurve: '共识收敛曲线', conflictGraph: '冲突关系图',
+        tabRoom: '会诊室视图', tabAnalytics: '数据分析视图', tabReport: '会诊报告', timelineTitle: '实时时间线', speakerDist: '专家发言分布', consensusCurve: '共识收敛曲线', conflictGraph: '冲突关系图', genConflictResolution: '生成冲突裁决建议',
         meetingTable: 'MDT 会诊桌（实时交互）', standby: '待命中',
         confirmAdopt: '确认/采纳', delete: '删除', emptyItems: '暂无条目，可手动新增或先导入病历。', emptyItemWarn: '存在空条目，提交时会自动忽略。',
         diagApiFmt: 'API: {api}', diagModelsFmt: 'models: {status} | {duration}ms | {time}', diagAgentsFmt: 'agents: {status} | {duration}ms | {time}',
@@ -409,14 +435,14 @@
         reqFail: '请求失败',
         needQuestion: '请先输入会诊问题',
         panelCleared: '病历解析结果面板已清空',
-        noParsedDoc: '当前病例暂无解析病历', loadedLatest: '已加载最近病历解析结果（文档ID {id}）', loadFailed: '加载失败', recentCasesEmpty: '暂无历史病例', recentCasesFail: '加载病例列表失败', switchedCase: '已切换病例：{id}',
+        noParsedDoc: '当前病例暂无解析病历', loadedLatest: '已加载最近病历解析结果（文档ID {id}）', confirmSaved: '解析结果已确认写回（ID {id}）', loadFailed: '加载失败', confirmFailed: '确认写回失败', recentCasesEmpty: '暂无历史病例', recentCasesFail: '加载病例列表失败', switchedCase: '已切换病例：{id}',
         submitOk: '已提交讨论，生成 {count} 条响应（已带入确认条目 {picked} 条，病历上下文:{docsOn} 文档{docCount}份）', on: '开', off: '关', submitFail: '提交失败',
         reviewOk: '二轮互评完成，新增 {count} 条事件', reviewFail: '二轮互评失败',
         addAgentOk: '已新增 {id}（模型: {model}）；推荐技能: {skills}', addFail: '新增失败', none: '无',
         modelMissingAgent: '模型配置失败：缺少 agent_id', modelUpdated: '已更新 {id} 模型为 {model}', modelUpdateFail: '模型更新失败',
         feedTextOk: '已给 {id} 注入文本知识', feedFail: '喂知识失败', feedUrlOk: '已给 {id} 注入网址知识', feedUrlFail: '网址注入失败',
         selectKnowledgeFile: '请先选择知识文件', feedFileOk: '已给 {id} 注入文件知识', feedFileFail: '文件注入失败',
-        caseImportDone: '病历导入完成，提取影像{imaging}条，检验{labs}条，用药{meds}条', caseImportFail: '病历网址导入失败',
+        caseImportProfileSaved: '病例导入信息已保存（{caseId}）', caseImportProfileLoaded: '已加载病例导入信息（{caseId}）', caseImportProfileFail: '病例导入信息操作失败', caseImportDone: '病历导入完成，提取影像{imaging}条，检验{labs}条，用药{meds}条', caseImportFail: '病历网址导入失败',
         selectCaseFile: '请先选择病历文件', caseUploadDone: '病历上传完成，提取影像{imaging}条，检验{labs}条，用药{meds}条', caseUploadFail: '病历文件导入失败',
         defaultModelOpt: '默认模型（{model}）',
         needCaseId: '请先填写病例 ID',
@@ -427,20 +453,23 @@
         wsInit: '初始化中（WebSocket 优先）', wsInitHint: '已使用同源 API/WS；如反代路径特殊可加 ?api=http://host:port 覆盖', initDonePartial: '初始化完成（模型列表加载失败，可手动重试）',
         wsConnectingState: 'WebSocket 连接中...', wsOpen: 'WebSocket 已连接（实时）', wsHandshakeTimeout: 'WebSocket 握手超时（降级轮询）', wsError: 'WebSocket 异常（降级轮询）', wsClosedFmt: 'WebSocket 断开（{reason}，降级轮询）', speakerEmpty: '暂无当前病例专家发言 / No speaker data for current case', consensusEmpty: '暂无共识曲线数据 / No consensus points for current case', conflictEmpty: '暂无冲突关系数据 / No conflict edges for current case',
         loadReport: '生成/刷新会诊报告', copyReport: '复制报告', reportEmpty: '暂无报告数据', reportCopied: '报告已复制', reportLoadFail: '报告加载失败', sentenceBadge: '逐句',
-        basicSummary: '基本病例摘要', clinicalQuestion: '临床问题', summaryText: '摘要', patientSummary: '病例信息', expertOpinions: '各专家核心意见', disputeProcess: '争议点与收敛过程', convergenceTimeline: '收敛时间线', finalConsensus: '最终共识', actionItems: '建议行动项',
+        basicSummary: '基本病例摘要', clinicalQuestion: '临床问题', summaryText: '摘要', patientSummary: '病例信息', expertOpinions: '各专家核心意见', disputeProcess: '争议点与收敛过程', convergenceTimeline: '收敛时间线', finalConsensus: '最终共识', actionItems: '建议行动项', actions: '执行建议',
+        generateMinutes: '一键生成纪要', exportMinutesPdf: '导出PDF', minutesEmpty: '暂无纪要数据', minutesGenerated: '纪要已生成', minutesLoadFail: '纪要加载失败', minutesExportHint: '请先生成纪要',
+        minutesBasicInfo: '基本信息', minutesKeyDisputes: '关键争议', minutesFinalConsensus: '最终共识', minutesExecution: '执行建议', minutesRiskFollowup: '风险与随访', minutesTimeline: '时间线摘要', minutesParticipants: '参与专家',
+        resolutionEmpty: '暂无冲突裁决建议', resolutionNoConflict: '当前无冲突，沿既有共识执行并持续监测。', resolutionLoadFail: '生成冲突裁决建议失败', conflictItem: '冲突项', involvedExperts: '涉及专家', evidenceDiff: '证据差异', recommendedActions: '可执行动作',
       },
       en: {
         pageTitle: 'MDT Consultation Console', headerTitle: 'MDT Console', wsConnecting: 'Connecting...', statusWaiting: 'Waiting for actions',
         diagTitle: 'Connectivity Diagnostics', retryModels: 'Retry Models', retryAgents: 'Retry Agents',
         consultInput: 'Consultation Input', msgPlaceholder: 'Enter clinical question...', refreshCases: 'Refresh Cases', useSelectedCase: 'Switch to Selected Case', enableDocs: 'Enable direct EMR context', submitDiscussion: 'Submit Discussion', reviewRound: 'Round-2 Peer Review', refreshConflict: 'Refresh Conflict Graph',
-        uploadCaseTitle: 'Upload Case Records (File/URL)', caseDocUrlPlaceholder: 'Case URL (web/PDF supported)', importCaseUrl: 'Import URL Record', uploadCaseFile: 'Upload Case File',
+        uploadCaseTitle: 'Upload Case Records (File/URL)', sourceCaseUrlPlaceholder: 'Source case URL', slideUrlsPlaceholder: 'Slide URLs (one per line)', initialDiagnosisPlaceholder: 'Initial diagnosis', round1TaskTemplatePlaceholder: 'Round-1 task template (editable)', saveImportProfile: 'Save import profile', loadImportProfile: 'Load import profile', caseDocUrlPlaceholder: 'Case URL (web/PDF supported)', importCaseUrl: 'Import URL Record', uploadCaseFile: 'Upload Case File',
         parsedPanelTitle: 'Parsed Case Panel (Editable Confirmation)', parsedPanelHint: 'Confirm/adopt imaging, labs and medication items before submission',
         imaging: 'Imaging', labs: 'Labs', medications: 'Medications', addImaging: '+ Add Imaging Item', addLabs: '+ Add Lab Item', addMeds: '+ Add Medication Item',
-        loadLatestParsed: 'Load Latest Parsed Result', clearPanel: 'Clear Panel',
+        confirmParsed: 'Confirm & Save', loadLatestParsed: 'Load Latest Parsed Result', clearPanel: 'Clear Panel',
         addAgentTitle: 'Add Agent', newAgentRolePlaceholder: 'Role e.g. Imaging Review', newAgentPromptPlaceholder: 'Optional: custom supplemental prompt', create: 'Create',
         feedKnowledgeTitle: 'Feed Knowledge (Text/File/URL)', feedContentPlaceholder: 'Paste guidelines/experience...', feedUrlPlaceholder: 'Knowledge URL (web/PDF)', injectText: 'Inject Text', injectUrl: 'Inject URL', injectFile: 'Inject File',
         agentModelTitle: 'Agent Model Settings', agentsLoading: 'Current Agents: loading...',
-        tabRoom: 'Conference Room View', tabAnalytics: 'Analytics View', tabReport: 'Consultation Report', timelineTitle: 'Real-time Timeline', speakerDist: 'Speaker Distribution', consensusCurve: 'Consensus Convergence', conflictGraph: 'Conflict Graph',
+        tabRoom: 'Conference Room View', tabAnalytics: 'Analytics View', tabReport: 'Consultation Report', timelineTitle: 'Real-time Timeline', speakerDist: 'Speaker Distribution', consensusCurve: 'Consensus Convergence', conflictGraph: 'Conflict Graph', genConflictResolution: 'Generate Conflict Resolution',
         meetingTable: 'MDT Conference Table (Realtime)', standby: 'Standby',
         confirmAdopt: 'Confirm/Adopt', delete: 'Delete', emptyItems: 'No items yet. Add manually or import a case record first.', emptyItemWarn: 'Empty items exist and will be ignored on submit.',
         diagApiFmt: 'API: {api}', diagModelsFmt: 'models: {status} | {duration}ms | {time}', diagAgentsFmt: 'agents: {status} | {duration}ms | {time}',
@@ -449,14 +478,14 @@
         reqFail: 'Request failed',
         needQuestion: 'Please enter a consultation question first',
         panelCleared: 'Parsed panel has been cleared',
-        noParsedDoc: 'No parsed case records found for this case', loadedLatest: 'Latest parsed record loaded (Doc ID {id})', loadFailed: 'Load failed', recentCasesEmpty: 'No recent cases', recentCasesFail: 'Failed to load case list', switchedCase: 'Switched case: {id}',
+        noParsedDoc: 'No parsed case records found for this case', loadedLatest: 'Latest parsed record loaded (Doc ID {id})', confirmSaved: 'Parsed result confirmed and saved (ID {id})', loadFailed: 'Load failed', confirmFailed: 'Confirm save failed', recentCasesEmpty: 'No recent cases', recentCasesFail: 'Failed to load case list', switchedCase: 'Switched case: {id}',
         submitOk: 'Discussion submitted. {count} responses generated ({picked} confirmed items included, docs context:{docsOn} docs={docCount})', on: 'on', off: 'off', submitFail: 'Submit failed',
         reviewOk: 'Round-2 review complete, {count} events added', reviewFail: 'Round-2 review failed',
         addAgentOk: 'Agent {id} created (model: {model}); suggested skills: {skills}', addFail: 'Create agent failed', none: 'none',
         modelMissingAgent: 'Model update failed: missing agent_id', modelUpdated: 'Updated {id} model to {model}', modelUpdateFail: 'Model update failed',
         feedTextOk: 'Injected text knowledge into {id}', feedFail: 'Knowledge feed failed', feedUrlOk: 'Injected URL knowledge into {id}', feedUrlFail: 'URL injection failed',
         selectKnowledgeFile: 'Please select a knowledge file first', feedFileOk: 'Injected file knowledge into {id}', feedFileFail: 'File injection failed',
-        caseImportDone: 'Case URL imported, extracted imaging {imaging}, labs {labs}, meds {meds}', caseImportFail: 'Case URL import failed',
+        caseImportProfileSaved: 'Case import profile saved ({caseId})', caseImportProfileLoaded: 'Case import profile loaded ({caseId})', caseImportProfileFail: 'Case import profile operation failed', caseImportDone: 'Case URL imported, extracted imaging {imaging}, labs {labs}, meds {meds}', caseImportFail: 'Case URL import failed',
         selectCaseFile: 'Please select a case file first', caseUploadDone: 'Case file uploaded, extracted imaging {imaging}, labs {labs}, meds {meds}', caseUploadFail: 'Case file import failed',
         defaultModelOpt: 'Default model ({model})',
         needCaseId: 'Please enter case ID first',
@@ -467,7 +496,10 @@
         wsInit: 'Initializing (WebSocket preferred)', wsInitHint: 'Using same-origin API/WS; append ?api=http://host:port if reverse-proxy path differs', initDonePartial: 'Initialization done (model list failed, retry manually)',
         wsConnectingState: 'WebSocket connecting...', wsOpen: 'WebSocket connected (realtime)', wsHandshakeTimeout: 'WebSocket handshake timeout (fallback to polling)', wsError: 'WebSocket error (fallback to polling)', wsClosedFmt: 'WebSocket closed ({reason}, fallback to polling)', speakerEmpty: 'No speaker data for current case / 暂无当前病例专家发言', consensusEmpty: 'No consensus points for current case / 暂无共识曲线数据', conflictEmpty: 'No conflict edges for current case / 暂无冲突关系数据',
         loadReport: 'Generate/Refresh Report', copyReport: 'Copy Report', reportEmpty: 'No report data', reportCopied: 'Report copied', reportLoadFail: 'Report load failed', sentenceBadge: 'Sentence',
-        basicSummary: 'Case Summary', clinicalQuestion: 'Clinical Question', summaryText: 'Summary', patientSummary: 'Patient Summary', expertOpinions: 'Expert Opinions', disputeProcess: 'Disputes & Convergence', convergenceTimeline: 'Convergence Timeline', finalConsensus: 'Final Consensus', actionItems: 'Action Items',
+        basicSummary: 'Case Summary', clinicalQuestion: 'Clinical Question', summaryText: 'Summary', patientSummary: 'Patient Summary', expertOpinions: 'Expert Opinions', disputeProcess: 'Disputes & Convergence', convergenceTimeline: 'Convergence Timeline', finalConsensus: 'Final Consensus', actionItems: 'Action Items', actions: 'Actions',
+        generateMinutes: 'Generate Minutes', exportMinutesPdf: 'Export PDF', minutesEmpty: 'No minutes data', minutesGenerated: 'Minutes generated', minutesLoadFail: 'Minutes load failed', minutesExportHint: 'Please generate minutes first',
+        minutesBasicInfo: 'Basic Info', minutesKeyDisputes: 'Key Disputes', minutesFinalConsensus: 'Final Consensus', minutesExecution: 'Execution Suggestions', minutesRiskFollowup: 'Risks & Follow-up', minutesTimeline: 'Timeline Summary', minutesParticipants: 'Participants',
+        resolutionEmpty: 'No conflict resolution generated yet', resolutionNoConflict: 'No active conflict. Proceed with current consensus and monitor.', resolutionLoadFail: 'Failed to generate conflict resolution', conflictItem: 'Conflict', involvedExperts: 'Experts', evidenceDiff: 'Evidence Gap', recommendedActions: 'Recommended Actions',
       }
     };
 
@@ -538,6 +570,10 @@
     const room = document.getElementById('room');
     const reportBody = document.getElementById('reportBody');
     const reportMeta = document.getElementById('reportMeta');
+    const minutesBody = document.getElementById('minutesBody');
+    const minutesMeta = document.getElementById('minutesMeta');
+    const conflictResolutionBody = document.getElementById('conflictResolutionBody');
+    const conflictResolutionMeta = document.getElementById('conflictResolutionMeta');
     const diagApi = document.getElementById('diagApi');
     const diagModels = document.getElementById('diagModels');
     const diagAgents = document.getElementById('diagAgents');
@@ -546,6 +582,7 @@
     const diagWsClose = document.getElementById('diagWsClose');
 
     let currentCaseEvents = [];
+    let currentMinutesData = null;
     const speakerChart = echarts.init(document.getElementById('speakerChart'));
     const consensusChart = echarts.init(document.getElementById('consensusChart'));
     const conflictChart = echarts.init(document.getElementById('conflictChart'));
@@ -749,17 +786,37 @@
     async function loadLatestParsedSections() {
       const caseId = document.getElementById('caseId').value.trim();
       try {
-        const { data } = await requestWithMeta(`/cases/${caseId}/documents`);
-        const latest = (data.documents || [])[0];
-        if (!latest) {
+        const { data } = await requestWithMeta(`/cases/${caseId}/parsed`);
+        if (!data.latest_doc && !data.confirmation) {
           resetSectionPanel();
           setStatusText(tr('noParsedDoc'));
           return;
         }
-        applySections(latest.sections || {});
-        setStatusText(tr('loadedLatest', { id: latest.id }));
+        applySections(data.effective_sections || {});
+        const refId = data.confirmation?.id || data.latest_doc?.doc_id || '-';
+        setStatusText(tr('loadedLatest', { id: refId }));
       } catch (e) {
         setStatusText(toErrorMessage(e, 'loadFailed'));
+      }
+    }
+
+    async function confirmParsedSections() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      try {
+        const { data: parsed } = await requestWithMeta(`/cases/${caseId}/parsed`);
+        const payload = {
+          ...getConfirmedSectionsPayload(),
+          source_doc_id: parsed?.latest_doc?.doc_id || null,
+          confirmed_by: 'frontend-user',
+        };
+        const { data } = await requestWithMeta(`/cases/${caseId}/parsed/confirm`, {
+          method: 'POST', headers: {'content-type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        setStatusText(tr('confirmSaved', { id: data.confirmation_id }));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'confirmFailed'));
       }
     }
 
@@ -874,11 +931,15 @@
       renderRoom();
       roundStateEl.textContent = tr('roundStateFmt', { round: '-', conflicts: '-', unified: '-' });
       renderCharts();
+      renderConflictResolution(null);
     }
 
     function clearReportView() {
       if (reportBody) reportBody.innerHTML = `<div class="empty-tip">${tr('reportEmpty')}</div>`;
       if (reportMeta) reportMeta.textContent = '-';
+      if (minutesBody) minutesBody.innerHTML = `<div class="empty-tip">${tr('minutesEmpty')}</div>`;
+      if (minutesMeta) minutesMeta.textContent = '-';
+      currentMinutesData = null;
     }
 
     function recomputeAnalytics() {
@@ -1022,6 +1083,121 @@
 
       if (reportMeta) {
         reportMeta.textContent = `${report.case_id} · ${report.generated_at} · ${report.case_status}`;
+      }
+    }
+
+    function listToHtml(items = []) {
+      const arr = (items || []).filter(x => String(x || '').trim());
+      if (!arr.length) return `<div class="empty-tip">-</div>`;
+      return `<ul class="report-list">${arr.map(x => `<li>${x}</li>`).join('')}</ul>`;
+    }
+
+    function renderMinutesContent(minutesWrap) {
+      const minutes = minutesWrap?.minutes;
+      if (!minutesBody || !minutesMeta) return;
+      if (!minutes) {
+        minutesBody.innerHTML = `<div class="empty-tip">${tr('minutesEmpty')}</div>`;
+        minutesMeta.textContent = '-';
+        return;
+      }
+      currentMinutesData = minutesWrap;
+      const m = minutes.minutes || {};
+      const basic = m.basic_info || {};
+      const participants = (m.participants || []).map(p => `${p.speaker}${p.specialty ? ` (${p.specialty})` : ''} · n=${p.event_count ?? '-'}`);
+      minutesMeta.textContent = `${minutes.case_id} · fp=${minutes.content_fingerprint || '-'} · events=${minutes.source_event_count ?? '-'} · ${minutes.generated_at || '-'}`;
+      minutesBody.innerHTML = `
+        <div class="minutes-section"><h5>${tr('minutesBasicInfo')}</h5>
+          <div><b>case_id:</b> ${basic.case_id || '-'}</div>
+          <div><b>status:</b> ${basic.case_status || '-'}</div>
+          <div><b>${tr('clinicalQuestion')}:</b> ${basic.clinical_question || '-'}</div>
+          <div><b>${tr('patientSummary')}:</b> ${JSON.stringify(basic.patient_summary || {})}</div>
+        </div>
+        <div class="minutes-section"><h5>${tr('minutesKeyDisputes')}</h5>${listToHtml(m.key_disputes)}</div>
+        <div class="minutes-section"><h5>${tr('minutesFinalConsensus')}</h5>${listToHtml(m.final_consensus)}</div>
+        <div class="minutes-section"><h5>${tr('minutesExecution')}</h5>${listToHtml(m.execution_suggestions)}</div>
+        <div class="minutes-section"><h5>${tr('minutesRiskFollowup')}</h5>${listToHtml(m.risks_and_followup)}</div>
+        <div class="minutes-section"><h5>${tr('minutesTimeline')}</h5>${listToHtml(m.timeline_summary)}</div>
+        <div class="minutes-section"><h5>${tr('minutesParticipants')}</h5>${listToHtml(participants)}</div>
+      `;
+    }
+
+    async function loadCaseMinutes() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/minutes`);
+        renderMinutesContent(data.minutes);
+        setStatusText(tr('minutesGenerated'));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'minutesLoadFail'));
+      }
+    }
+
+    function exportMinutesPdf() {
+      if (!currentMinutesData || !currentMinutesData.minutes) {
+        setStatusText(tr('minutesExportHint'));
+        return;
+      }
+      const html = minutesBody?.innerHTML || '';
+      const meta = minutesMeta?.textContent || '';
+      const title = `${currentMinutesData.minutes.case_id || 'MDT'}-minutes`;
+      const win = window.open('', '_blank');
+      if (!win) return;
+      win.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>${title}</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1{font-size:20px;margin:0 0 6px}.meta{font-size:12px;color:#555;margin-bottom:12px}.minutes-section{border:1px solid #ddd;border-radius:8px;padding:10px;margin-bottom:10px}ul{margin:0;padding-left:20px}li{margin:3px 0}@media print{@page{size:A4;margin:14mm}}</style></head><body><h1>MDT Minutes</h1><div class="meta">${meta}</div>${html}</body></html>`);
+      win.document.close();
+      win.focus();
+      setTimeout(() => win.print(), 200);
+    }
+
+    function renderConflictResolution(data) {
+      if (!conflictResolutionBody || !conflictResolutionMeta) return;
+      if (!data) {
+        conflictResolutionMeta.textContent = '-';
+        conflictResolutionBody.innerHTML = `<div class="empty-tip">${tr('resolutionEmpty')}</div>`;
+        return;
+      }
+
+      conflictResolutionMeta.textContent = `${data.case_id} · priority=${data.priority || '-'} · confidence=${data.confidence ?? '-'} · conflicts=${(data.conflicts || []).length}`;
+      if (!data.has_conflict) {
+        conflictResolutionBody.innerHTML = `<div class="empty-tip">${data.message || tr('resolutionNoConflict')}</div>`;
+        return;
+      }
+
+      const cards = (data.recommendations || []).map((rec, idx) => {
+        const conflict = (data.conflicts || []).find(c => c.conflict_id === rec.conflict_id) || {};
+        const acts = (rec.actions || []).map((a, i) => `
+          <li><b>${a.action_type}</b> | owner=${a.owner} | ${a.deadline_hint}<br/>${a.rationale}</li>
+        `).join('') || `<li>-</li>`;
+        return `
+          <div class="report-card">
+            <div><b>${tr('conflictItem')} ${idx + 1}</b> · priority=${rec.priority || '-'} · confidence=${rec.confidence ?? '-'}</div>
+            <div><b>${tr('summaryText')}</b> ${rec.dispute_point || conflict.dispute_point || '-'}</div>
+            <div><b>${tr('involvedExperts')}</b> ${(conflict.involved_experts || []).join(', ') || '-'}</div>
+            <div><b>${tr('evidenceDiff')}</b> ${conflict.evidence_diff || '-'}</div>
+            <div style="margin-top:6px;"><b>${tr('recommendedActions')}</b></div>
+            <ul class="report-list">${acts}</ul>
+          </div>
+        `;
+      }).join('');
+
+      conflictResolutionBody.innerHTML = cards || `<div class="empty-tip">${tr('resolutionEmpty')}</div>`;
+    }
+
+    async function generateConflictResolution() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/conflict-resolution`, {
+          method: 'POST',
+          headers: {'content-type': 'application/json'},
+          body: JSON.stringify({
+            max_actions_per_conflict: 3,
+            extra_context: document.getElementById('msg').value.trim() || '',
+          })
+        });
+        renderConflictResolution(data);
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'resolutionLoadFail'));
       }
     }
 
