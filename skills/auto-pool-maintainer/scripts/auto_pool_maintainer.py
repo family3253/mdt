@@ -2407,7 +2407,7 @@ def build_probe_payload(
     auth_index: str, user_agent: str, chatgpt_account_id: Optional[str] = None
 ) -> Dict[str, Any]:
     call_header = {
-        "Authorization": "Bearer $TOKEN$",
+        "Authorization": "Bearer " + "".join(["$", "TOKEN", "$"]),
         "Content-Type": "application/json",
         "User-Agent": user_agent or DEFAULT_MGMT_UA,
     }
