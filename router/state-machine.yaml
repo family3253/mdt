@@ -1,0 +1,32 @@
+states:
+  - triage
+  - specialist_parallel_round_1
+  - conflict_merge
+  - specialist_targeted_round_2
+  - finalize
+  - escalated_to_human
+
+transitions:
+  - from: triage
+    to: specialist_parallel_round_1
+    when: case_card_complete
+
+  - from: specialist_parallel_round_1
+    to: conflict_merge
+    when: all_required_specialists_responded
+
+  - from: conflict_merge
+    to: specialist_targeted_round_2
+    when: unresolved_issues_count > 0
+
+  - from: conflict_merge
+    to: finalize
+    when: unresolved_issues_count == 0
+
+  - from: specialist_targeted_round_2
+    to: finalize
+    when: round2_completed
+
+  - from: '*'
+    to: escalated_to_human
+    when: danger_flag == true

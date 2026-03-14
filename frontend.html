@@ -1,0 +1,1662 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title data-i18n="pageTitle">MDT 会诊控制台</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --card: #131a2e;
+      --line: #2a3558;
+      --text: #e8eeff;
+      --muted: #9eabd6;
+      --ok: #2ecc71;
+      --warn: #f39c12;
+      --bad: #ff5f6d;
+      --accent: #6ea8fe;
+      --accent-2: #4f7ee8;
+      --panel-glow: rgba(110,168,254,.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      background: radial-gradient(circle at top, #121a33 0%, var(--bg) 55%);
+      color: var(--text);
+    }
+    .app {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      min-height: 100vh;
+      gap: 0;
+    }
+    .sidebar {
+      border-right: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(8,12,24,.92) 0%, rgba(8,12,24,.82) 100%);
+      padding: 16px;
+    }
+    .main { padding: 18px; }
+
+    .header-box {
+      background: linear-gradient(165deg, rgba(20,30,58,.95) 0%, rgba(16,24,45,.95) 100%);
+      border: 1px solid #30406a;
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 10px 24px rgba(6,10,20,.28);
+      margin-bottom: 12px;
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .title { margin: 0 0 6px; font-size: 20px; letter-spacing: .2px; }
+    .muted { color: var(--muted); font-size: 12px; }
+
+    .lang-switch {
+      display: flex;
+      border: 1px solid #3a4d7d;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(11,16,32,.6);
+    }
+    .lang-btn {
+      width: auto;
+      min-width: 48px;
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      padding: 6px 10px;
+      font-size: 12px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .lang-btn.active {
+      background: rgba(110,168,254,.22);
+      color: #dce8ff;
+      font-weight: 600;
+    }
+
+    .status-pill {
+      display: inline-block;
+      padding: 5px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid transparent;
+      background: rgba(243,156,18,.18);
+      color: #ffd79d;
+    }
+    .status-pill.ok { background: rgba(46,204,113,.18); border-color: rgba(46,204,113,.45); color: #bcffd4; }
+    .status-pill.warn { background: rgba(243,156,18,.18); border-color: rgba(243,156,18,.45); color: #ffd79d; }
+    .status-pill.bad { background: rgba(255,95,109,.18); border-color: rgba(255,95,109,.45); color: #ffc0c8; }
+
+    .panel {
+      background: linear-gradient(180deg, rgba(19,26,46,.96) 0%, rgba(15,22,40,.96) 100%);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 8px 18px rgba(4,8,16,.24), inset 0 1px 0 rgba(255,255,255,.03);
+    }
+    .panel > b {
+      display: block;
+      margin-bottom: 6px;
+      letter-spacing: .2px;
+      color: #dce8ff;
+    }
+
+    input, textarea, button, select {
+      width: 100%;
+      margin-top: 8px;
+      background: #0f152a;
+      color: var(--text);
+      border: 1px solid #2a375f;
+      border-radius: 10px;
+      padding: 10px;
+      outline: none;
+    }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(110,168,254,.14); }
+    button { cursor: pointer; background: #1b2748; transition: .18s ease; }
+    button:hover { border-color: #4a6ec4; transform: translateY(-1px); }
+
+    .btn-primary { background: linear-gradient(180deg, #2d4c9c 0%, #253f83 100%); border-color: #4d74d1; }
+    .btn-secondary { background: #1a2341; border-color: #3a4f84; }
+    .btn-ghost { background: rgba(18,28,54,.55); border-style: dashed; }
+
+    .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+    .tab {
+      padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
+      color: var(--muted); background: rgba(13,20,38,.65);
+    }
+    .tab.active { color: var(--text); border-color: var(--accent); background: rgba(110,168,254,.13); }
+    .view { display: none; }
+    .view.active { display: block; }
+
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .chart { height: 300px; }
+    .timeline { max-height: 320px; overflow: auto; }
+    .timeline .ev.full { border-color: rgba(110,168,254,.4); background: rgba(15,22,40,.6); border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+    .timeline .ev.full .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: rgba(110,168,254,.18); color: #cfe0ff; margin-right: 6px; }
+    .timeline .ev.full .sentence { color: #e7edff; font-size: 13px; line-height: 1.5; margin-top: 4px; }
+    .report-panel { max-height: 460px; overflow: auto; line-height: 1.6; }
+    .report-panel h4 { margin: 8px 0 6px; font-size: 14px; color: #dce8ff; }
+    .report-list { margin: 0; padding-left: 16px; }
+    .report-card { border: 1px solid #2a375f; border-radius: 10px; padding: 10px; background: rgba(10,16,32,.7); margin-bottom: 10px; }
+    .minutes-section { border: 1px solid #324069; border-radius: 10px; padding: 10px; margin-bottom: 10px; background: rgba(9,14,28,.78); }
+    .minutes-section h5 { margin: 0 0 6px; font-size: 13px; color: #cfe0ff; }
+
+    .section-col { border: 1px solid #2a375f; border-radius: 10px; padding: 8px; background: #0f152a; min-height: 220px; }
+    .section-col h4 { margin: 0 0 8px; font-size: 14px; color: #dce8ff; }
+    .section-list { display: flex; flex-direction: column; gap: 8px; }
+    .section-item { border: 1px solid #334270; border-radius: 10px; padding: 8px; background: rgba(16, 23, 44, .85); }
+    .section-item textarea { min-height: 62px; margin-top: 0; }
+    .item-row { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; margin-top: 6px; }
+    .check-inline { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+    .check-inline input { width: auto; margin: 0; }
+    .item-del { width: auto; padding: 6px 10px; margin-top: 0; font-size: 12px; }
+    .empty-tip { color: var(--muted); font-size: 12px; border: 1px dashed #334270; border-radius: 8px; padding: 8px; }
+    .err-tip { color: #ff9aa5; font-size: 12px; min-height: 16px; margin-top: 4px; }
+    .mini-btn { padding: 6px 10px; font-size: 12px; margin-top: 8px; }
+    .agent-model-row { display: grid; grid-template-columns: 1fr 108px; gap: 8px; align-items: center; margin-top: 8px; }
+    .agent-model-row button { margin-top: 0; padding: 8px; }
+    .ev { border-bottom: 1px dashed #324069; padding: 8px 0; }
+    .ev:last-child { border-bottom: 0; }
+
+    .room {
+      position: relative;
+      height: 580px;
+      background: linear-gradient(180deg, #1a2140 0%, #11172b 100%);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 10px 24px rgba(6,10,20,.28);
+    }
+    .meeting-table {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      width: 380px; height: 180px; border-radius: 999px;
+      background: #2a365f; border: 2px solid #4a5a8b;
+      display: flex; align-items: center; justify-content: center;
+      color: #c9d8ff; font-size: 14px;
+      box-shadow: 0 0 0 8px var(--panel-glow);
+    }
+    .seat {
+      position: absolute;
+      width: 88px;
+      text-align: center;
+      transform: translate(-50%, -50%);
+    }
+    .avatar {
+      width: 54px; height: 54px; border-radius: 50%;
+      margin: 0 auto 6px;
+      border: 2px solid #6b7bb0;
+      display: flex; align-items: center; justify-content: center;
+      background: #243258;
+      font-size: 12px;
+    }
+    .seat.speaking .avatar { border-color: var(--ok); box-shadow: 0 0 0 6px rgba(46,204,113,.18); }
+    .seat.review .avatar { border-color: var(--warn); box-shadow: 0 0 0 6px rgba(243,156,18,.18); }
+    .seat.conflict .avatar { border-color: var(--bad); box-shadow: 0 0 0 6px rgba(255,95,109,.2); }
+    .seat .name { font-size: 12px; color: #d8e4ff; }
+    .seat .bubble {
+      margin-top: 4px;
+      font-size: 11px;
+      color: #b5c4ee;
+      background: rgba(7,10,21,.7);
+      border: 1px solid #334270;
+      border-radius: 8px;
+      padding: 4px 6px;
+      min-height: 26px;
+    }
+    @media (max-width: 1200px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+      .grid2 { grid-template-columns: 1fr; }
+      .grid3 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="header-box">
+        <div class="header-top">
+          <h2 class="title" data-i18n="headerTitle">MDT 控制台</h2>
+          <div class="lang-switch" aria-label="language switch">
+            <button id="lang-zh" class="lang-btn" onclick="setLanguage('zh')">ZH</button>
+            <button id="lang-en" class="lang-btn" onclick="setLanguage('en')">EN</button>
+          </div>
+        </div>
+        <div><span id="wsState" class="status-pill warn" data-i18n="wsConnecting">连接中...</span></div>
+        <div id="status" class="muted" style="margin-top:8px;" data-i18n="statusWaiting">等待操作</div>
+      </div>
+
+      <div class="panel">
+        <b data-i18n="diagTitle">连接诊断</b>
+        <div id="diagApi" class="muted" style="margin-top:6px;"></div>
+        <div id="diagModels" class="muted" style="margin-top:4px;"></div>
+        <div id="diagAgents" class="muted" style="margin-top:4px;"></div>
+        <div id="diagPoll" class="muted" style="margin-top:4px;"></div>
+        <div id="diagWs" class="muted" style="margin-top:4px;"></div>
+        <div id="diagWsClose" class="muted" style="margin-top:4px;"></div>
+        <div class="btn-row" style="margin-top:8px;">
+          <button class="btn-secondary" onclick="retryLoadModels()" data-i18n="retryModels">重试加载模型</button>
+          <button class="btn-secondary" onclick="retryLoadAgents()" data-i18n="retryAgents">重试加载 Agent</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <b data-i18n="consultInput">会诊输入</b>
+        <input id="caseId" value="CASE-LIVE-001" placeholder="Case ID" />
+        <div class="btn-row" style="margin-top:8px; grid-template-columns: 1fr auto;">
+          <select id="recentCaseSelect"></select>
+          <button class="btn-ghost" style="width:auto; padding:10px 12px;" onclick="refreshRecentCases()" data-i18n="refreshCases">刷新病例</button>
+        </div>
+        <button class="btn-ghost" onclick="applySelectedCase()" data-i18n="useSelectedCase">切换到所选病例</button>
+        <textarea id="msg" data-i18n-ph="msgPlaceholder" placeholder="输入临床问题...">患者发热低血压，近期广谱抗菌药暴露，伴 AKI 风险</textarea>
+        <label class="check-inline" style="margin-top:8px; display:flex;">
+          <input id="enableDocsContext" type="checkbox" checked />
+          <span data-i18n="enableDocs">启用病历直读上下文</span>
+        </label>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="submitDiscussion()" data-i18n="submitDiscussion">提交讨论</button>
+          <button class="btn-secondary" onclick="runReviewRound()" data-i18n="reviewRound">二轮互评</button>
+        </div>
+        <button class="btn-ghost" onclick="loadConflictGraph()" data-i18n="refreshConflict">刷新冲突图</button>
+      </div>
+
+      <div class="panel">
+        <b data-i18n="uploadCaseTitle">上传病历（文件/网址）</b>
+        <input id="sourceCaseUrl" data-i18n-ph="sourceCaseUrlPlaceholder" placeholder="原始病例来源 URL" />
+        <textarea id="slideUrls" data-i18n-ph="slideUrlsPlaceholder" placeholder="切片 URL（每行一个）"></textarea>
+        <input id="initialDiagnosis" data-i18n-ph="initialDiagnosisPlaceholder" placeholder="初始诊断" />
+        <textarea id="round1TaskTemplate" data-i18n-ph="round1TaskTemplatePlaceholder" placeholder="首轮任务模板"></textarea>
+        <input id="caseDocUrl" data-i18n-ph="caseDocUrlPlaceholder" placeholder="病历网址（支持网页/PDF链接）" />
+        <input id="caseDocFile" type="file" />
+        <div class="btn-row">
+          <button class="btn-secondary" onclick="saveCaseImportProfile()" data-i18n="saveImportProfile">保存导入信息</button>
+          <button class="btn-secondary" onclick="loadCaseImportProfile()" data-i18n="loadImportProfile">加载导入信息</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn-secondary" onclick="uploadCaseDocUrl()" data-i18n="importCaseUrl">导入网址病历</button>
+          <button class="btn-secondary" onclick="uploadCaseDocFile()" data-i18n="uploadCaseFile">上传病历文件</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <b data-i18n="parsedPanelTitle">病历解析结果面板（可编辑确认）</b>
+        <div class="muted" style="margin:6px 0 8px;" data-i18n="parsedPanelHint">提交会诊前可确认/采纳影像、检验、用药条目</div>
+        <div class="grid3">
+          <div class="section-col">
+            <h4 data-i18n="imaging">影像</h4>
+            <div id="section-imaging" class="section-list"></div>
+            <div id="err-imaging" class="err-tip"></div>
+            <button class="mini-btn btn-secondary" onclick="addSectionItem('imaging')" data-i18n="addImaging">+ 新增影像条目</button>
+          </div>
+          <div class="section-col">
+            <h4 data-i18n="labs">检验</h4>
+            <div id="section-labs" class="section-list"></div>
+            <div id="err-labs" class="err-tip"></div>
+            <button class="mini-btn btn-secondary" onclick="addSectionItem('labs')" data-i18n="addLabs">+ 新增检验条目</button>
+          </div>
+          <div class="section-col">
+            <h4 data-i18n="medications">用药</h4>
+            <div id="section-medications" class="section-list"></div>
+            <div id="err-medications" class="err-tip"></div>
+            <button class="mini-btn btn-secondary" onclick="addSectionItem('medications')" data-i18n="addMeds">+ 新增用药条目</button>
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:8px; grid-template-columns: 1fr 1fr 1fr;">
+          <button class="btn-primary" onclick="confirmParsedSections()" data-i18n="confirmParsed">确认写回</button>
+          <button class="btn-secondary" onclick="loadLatestParsedSections()" data-i18n="loadLatestParsed">加载最近解析结果</button>
+          <button class="btn-secondary" onclick="resetSectionPanel()" data-i18n="clearPanel">清空面板</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <b data-i18n="addAgentTitle">新增 Agent</b>
+        <input id="newAgentId" placeholder="agent_id e.g. mdt-radiology" />
+        <input id="newAgentRole" data-i18n-ph="newAgentRolePlaceholder" placeholder="角色 e.g. 影像评估" />
+        <input id="newAgentSpec" placeholder="specialty e.g. radiology" />
+        <select id="newAgentModel"></select>
+        <textarea id="newAgentPrompt" data-i18n-ph="newAgentPromptPlaceholder" placeholder="可选：自定义补充提示词"></textarea>
+        <button class="btn-primary" onclick="createAgent()" data-i18n="create">新增</button>
+      </div>
+
+      <div class="panel">
+        <b data-i18n="feedKnowledgeTitle">喂知识（文本/文件/网址）</b>
+        <input id="feedAgentId" placeholder="agent_id" />
+        <input id="feedSource" value="manual" placeholder="source" />
+        <textarea id="feedContent" data-i18n-ph="feedContentPlaceholder" placeholder="粘贴指南/经验知识...">AKI 场景优先按 eGFR 分层调整剂量并联合 TDM。</textarea>
+        <input id="feedUrl" data-i18n-ph="feedUrlPlaceholder" placeholder="知识网址（网页/PDF）" />
+        <input id="feedFile" type="file" />
+        <div class="btn-row">
+          <button class="btn-secondary" onclick="feedKnowledge()" data-i18n="injectText">注入文本</button>
+          <button class="btn-secondary" onclick="feedKnowledgeUrl()" data-i18n="injectUrl">注入网址</button>
+        </div>
+        <button class="btn-secondary" onclick="feedKnowledgeFile()" data-i18n="injectFile">注入文件</button>
+      </div>
+
+      <div class="panel">
+        <b data-i18n="agentModelTitle">Agent 模型配置</b>
+        <div class="muted" id="agentsList" style="margin-top:6px;" data-i18n="agentsLoading">当前 Agent: loading...</div>
+        <div id="agentModelList"></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="tabs">
+        <div class="tab active" data-tab="room" data-i18n="tabRoom">会诊室视图</div>
+        <div class="tab" data-tab="analytics" data-i18n="tabAnalytics">数据分析视图</div>
+        <div class="tab" data-tab="report" data-i18n="tabReport">会诊报告</div>
+      </div>
+
+      <section id="view-room" class="view active">
+        <div class="room" id="room"></div>
+      </section>
+
+      <section id="view-analytics" class="view">
+        <div class="grid2">
+          <div class="panel">
+            <h3 style="margin-top:0" data-i18n="timelineTitle">实时时间线</h3>
+            <div class="muted" style="margin-bottom:8px;"><b data-i18n="roundStateTitle">迭代状态</b>：<span id="roundState">-</span></div>
+            <div id="timeline" class="timeline"></div>
+          </div>
+          <div class="panel">
+            <h3 style="margin-top:0" data-i18n="speakerDist">专家发言分布</h3>
+            <div id="speakerChart" class="chart"></div>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="panel">
+            <h3 style="margin-top:0" data-i18n="consensusCurve">共识收敛曲线</h3>
+            <div id="consensusChart" class="chart"></div>
+          </div>
+          <div class="panel">
+            <h3 style="margin-top:0" data-i18n="conflictGraph">冲突关系图</h3>
+            <div id="conflictChart" class="chart"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="btn-row" style="grid-template-columns: auto 1fr; align-items: center;">
+            <button class="btn-primary" style="width:auto;" onclick="generateConflictResolution()" data-i18n="genConflictResolution">生成冲突裁决建议</button>
+            <div class="muted" id="conflictResolutionMeta">-</div>
+          </div>
+          <div id="conflictResolutionBody" class="report-panel" style="margin-top:10px;"></div>
+        </div>
+      </section>
+
+      <section id="view-report" class="view">
+        <div class="panel">
+          <div class="btn-row">
+            <button class="btn-primary" onclick="loadCaseReport()" data-i18n="loadReport">生成/刷新会诊报告</button>
+            <button class="btn-secondary" onclick="copyReport()" data-i18n="copyReport">复制报告</button>
+          </div>
+          <div class="muted" id="reportMeta" style="margin-top:8px;">-</div>
+          <div id="reportBody" class="report-panel" style="margin-top:10px;"></div>
+        </div>
+        <div class="panel">
+          <div class="btn-row">
+            <button class="btn-primary" onclick="loadCaseMinutes()" data-i18n="generateMinutes">一键生成纪要</button>
+            <button class="btn-secondary" onclick="exportMinutesPdf()" data-i18n="exportMinutesPdf">导出PDF</button>
+          </div>
+          <div class="muted" id="minutesMeta" style="margin-top:8px;">-</div>
+          <div id="minutesBody" class="report-panel" style="margin-top:10px;"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const I18N = {
+      zh: {
+        pageTitle: 'MDT 会诊控制台', headerTitle: 'MDT 控制台', wsConnecting: '连接中...', statusWaiting: '等待操作',
+        diagTitle: '连接诊断', retryModels: '重试加载模型', retryAgents: '重试加载 Agent',
+        consultInput: '会诊输入', msgPlaceholder: '输入临床问题...', refreshCases: '刷新病例', useSelectedCase: '切换到所选病例', enableDocs: '启用病历直读上下文', submitDiscussion: '提交讨论', reviewRound: '二轮互评', refreshConflict: '刷新冲突图',
+        uploadCaseTitle: '上传病历（文件/网址）', sourceCaseUrlPlaceholder: '原始病例来源 URL', slideUrlsPlaceholder: '切片 URL（每行一个）', initialDiagnosisPlaceholder: '初始诊断', round1TaskTemplatePlaceholder: '首轮任务模板（可编辑）', saveImportProfile: '保存导入信息', loadImportProfile: '加载导入信息', caseDocUrlPlaceholder: '病历网址（支持网页/PDF链接）', importCaseUrl: '导入网址病历', uploadCaseFile: '上传病历文件',
+        parsedPanelTitle: '病历解析结果面板（可编辑确认）', parsedPanelHint: '提交会诊前可确认/采纳影像、检验、用药条目',
+        imaging: '影像', labs: '检验', medications: '用药', addImaging: '+ 新增影像条目', addLabs: '+ 新增检验条目', addMeds: '+ 新增用药条目',
+        confirmParsed: '确认写回', loadLatestParsed: '加载最近解析结果', clearPanel: '清空面板',
+        addAgentTitle: '新增 Agent', newAgentRolePlaceholder: '角色 e.g. 影像评估', newAgentPromptPlaceholder: '可选：自定义补充提示词', create: '新增',
+        feedKnowledgeTitle: '喂知识（文本/文件/网址）', feedContentPlaceholder: '粘贴指南/经验知识...', feedUrlPlaceholder: '知识网址（网页/PDF）', injectText: '注入文本', injectUrl: '注入网址', injectFile: '注入文件',
+        agentModelTitle: 'Agent 模型配置', agentsLoading: '当前 Agent: loading...',
+        tabRoom: '会诊室视图', tabAnalytics: '数据分析视图', tabReport: '会诊报告', timelineTitle: '实时时间线', speakerDist: '专家发言分布', consensusCurve: '共识收敛曲线', conflictGraph: '冲突关系图', genConflictResolution: '生成冲突裁决建议',
+        meetingTable: 'MDT 会诊桌（实时交互）', standby: '待命中',
+        confirmAdopt: '确认/采纳', delete: '删除', emptyItems: '暂无条目，可手动新增或先导入病历。', emptyItemWarn: '存在空条目，提交时会自动忽略。',
+        diagApiFmt: 'API: {api}', diagModelsFmt: 'models: {status} | {duration}ms | {time}', diagAgentsFmt: 'agents: {status} | {duration}ms | {time}',
+        diagPollFmt: '轮询: {active} | 最近成功: {last} | 当前间隔: {sec}s', pollOn: '启用', pollOff: '关闭',
+        diagWsFmt: 'WS readyState: {state} | last error: {err} | 最近握手: {time}', diagWsCloseFmt: 'WS close: code={code} reason={reason}',
+        reqFail: '请求失败',
+        needQuestion: '请先输入会诊问题',
+        panelCleared: '病历解析结果面板已清空',
+        noParsedDoc: '当前病例暂无解析病历', loadedLatest: '已加载最近病历解析结果（文档ID {id}）', confirmSaved: '解析结果已确认写回（ID {id}）', loadFailed: '加载失败', confirmFailed: '确认写回失败', recentCasesEmpty: '暂无历史病例', recentCasesFail: '加载病例列表失败', switchedCase: '已切换病例：{id}',
+        submitOk: '已提交讨论，生成 {count} 条响应（已带入确认条目 {picked} 条，病历上下文:{docsOn} 文档{docCount}份）', on: '开', off: '关', submitFail: '提交失败',
+        reviewOk: '二轮互评完成，新增 {count} 条事件', reviewFail: '二轮互评失败',
+        addAgentOk: '已新增 {id}（模型: {model}）；推荐技能: {skills}', addFail: '新增失败', none: '无',
+        modelMissingAgent: '模型配置失败：缺少 agent_id', modelUpdated: '已更新 {id} 模型为 {model}', modelUpdateFail: '模型更新失败',
+        feedTextOk: '已给 {id} 注入文本知识', feedFail: '喂知识失败', feedUrlOk: '已给 {id} 注入网址知识', feedUrlFail: '网址注入失败',
+        selectKnowledgeFile: '请先选择知识文件', feedFileOk: '已给 {id} 注入文件知识', feedFileFail: '文件注入失败',
+        caseImportProfileSaved: '病例导入信息已保存（{caseId}）', caseImportProfileLoaded: '已加载病例导入信息（{caseId}）', caseImportProfileFail: '病例导入信息操作失败', caseImportDone: '病历导入完成，提取影像{imaging}条，检验{labs}条，用药{meds}条', caseImportFail: '病历网址导入失败',
+        selectCaseFile: '请先选择病历文件', caseUploadDone: '病历上传完成，提取影像{imaging}条，检验{labs}条，用药{meds}条', caseUploadFail: '病历文件导入失败',
+        defaultModelOpt: '默认模型（{model}）',
+        needCaseId: '请先填写病例 ID',
+        modelsFallback: '模型列表使用降级配置：{note}',
+        agentsListFmt: '当前 Agent({count}): {agents}', saveModel: '保存模型',
+        conflictFail: '加载冲突图失败', roundStateTitle: '迭代状态', roundStateFmt: '当前轮次: {round} | 冲突数: {conflicts} | 已统一: {unified}', yes: '是', no: '否',
+        modelsLoadOk: '模型列表加载成功', modelsLoadFail: '加载模型列表失败', agentsLoadOk: 'Agent 列表加载成功', agentsLoadFail: '加载 Agent 列表失败',
+        wsInit: '初始化中（WebSocket 优先）', wsInitHint: '已使用同源 API/WS；如反代路径特殊可加 ?api=http://host:port 覆盖', initDonePartial: '初始化完成（模型列表加载失败，可手动重试）',
+        wsConnectingState: 'WebSocket 连接中...', wsOpen: 'WebSocket 已连接（实时）', wsHandshakeTimeout: 'WebSocket 握手超时（降级轮询）', wsError: 'WebSocket 异常（降级轮询）', wsClosedFmt: 'WebSocket 断开（{reason}，降级轮询）', speakerEmpty: '暂无当前病例专家发言 / No speaker data for current case', consensusEmpty: '暂无共识曲线数据 / No consensus points for current case', conflictEmpty: '暂无冲突关系数据 / No conflict edges for current case',
+        loadReport: '生成/刷新会诊报告', copyReport: '复制报告', reportEmpty: '暂无报告数据', reportCopied: '报告已复制', reportLoadFail: '报告加载失败', sentenceBadge: '逐句',
+        basicSummary: '基本病例摘要', clinicalQuestion: '临床问题', summaryText: '摘要', patientSummary: '病例信息', expertOpinions: '各专家核心意见', disputeProcess: '争议点与收敛过程', convergenceTimeline: '收敛时间线', finalConsensus: '最终共识', actionItems: '建议行动项', actions: '执行建议',
+        generateMinutes: '一键生成纪要', exportMinutesPdf: '导出PDF', minutesEmpty: '暂无纪要数据', minutesGenerated: '纪要已生成', minutesLoadFail: '纪要加载失败', minutesExportHint: '请先生成纪要',
+        minutesBasicInfo: '基本信息', minutesKeyDisputes: '关键争议', minutesFinalConsensus: '最终共识', minutesExecution: '执行建议', minutesRiskFollowup: '风险与随访', minutesTimeline: '时间线摘要', minutesParticipants: '参与专家',
+        resolutionEmpty: '暂无冲突裁决建议', resolutionNoConflict: '当前无冲突，沿既有共识执行并持续监测。', resolutionLoadFail: '生成冲突裁决建议失败', conflictItem: '冲突项', involvedExperts: '涉及专家', evidenceDiff: '证据差异', recommendedActions: '可执行动作',
+      },
+      en: {
+        pageTitle: 'MDT Consultation Console', headerTitle: 'MDT Console', wsConnecting: 'Connecting...', statusWaiting: 'Waiting for actions',
+        diagTitle: 'Connectivity Diagnostics', retryModels: 'Retry Models', retryAgents: 'Retry Agents',
+        consultInput: 'Consultation Input', msgPlaceholder: 'Enter clinical question...', refreshCases: 'Refresh Cases', useSelectedCase: 'Switch to Selected Case', enableDocs: 'Enable direct EMR context', submitDiscussion: 'Submit Discussion', reviewRound: 'Round-2 Peer Review', refreshConflict: 'Refresh Conflict Graph',
+        uploadCaseTitle: 'Upload Case Records (File/URL)', sourceCaseUrlPlaceholder: 'Source case URL', slideUrlsPlaceholder: 'Slide URLs (one per line)', initialDiagnosisPlaceholder: 'Initial diagnosis', round1TaskTemplatePlaceholder: 'Round-1 task template (editable)', saveImportProfile: 'Save import profile', loadImportProfile: 'Load import profile', caseDocUrlPlaceholder: 'Case URL (web/PDF supported)', importCaseUrl: 'Import URL Record', uploadCaseFile: 'Upload Case File',
+        parsedPanelTitle: 'Parsed Case Panel (Editable Confirmation)', parsedPanelHint: 'Confirm/adopt imaging, labs and medication items before submission',
+        imaging: 'Imaging', labs: 'Labs', medications: 'Medications', addImaging: '+ Add Imaging Item', addLabs: '+ Add Lab Item', addMeds: '+ Add Medication Item',
+        confirmParsed: 'Confirm & Save', loadLatestParsed: 'Load Latest Parsed Result', clearPanel: 'Clear Panel',
+        addAgentTitle: 'Add Agent', newAgentRolePlaceholder: 'Role e.g. Imaging Review', newAgentPromptPlaceholder: 'Optional: custom supplemental prompt', create: 'Create',
+        feedKnowledgeTitle: 'Feed Knowledge (Text/File/URL)', feedContentPlaceholder: 'Paste guidelines/experience...', feedUrlPlaceholder: 'Knowledge URL (web/PDF)', injectText: 'Inject Text', injectUrl: 'Inject URL', injectFile: 'Inject File',
+        agentModelTitle: 'Agent Model Settings', agentsLoading: 'Current Agents: loading...',
+        tabRoom: 'Conference Room View', tabAnalytics: 'Analytics View', tabReport: 'Consultation Report', timelineTitle: 'Real-time Timeline', speakerDist: 'Speaker Distribution', consensusCurve: 'Consensus Convergence', conflictGraph: 'Conflict Graph', genConflictResolution: 'Generate Conflict Resolution',
+        meetingTable: 'MDT Conference Table (Realtime)', standby: 'Standby',
+        confirmAdopt: 'Confirm/Adopt', delete: 'Delete', emptyItems: 'No items yet. Add manually or import a case record first.', emptyItemWarn: 'Empty items exist and will be ignored on submit.',
+        diagApiFmt: 'API: {api}', diagModelsFmt: 'models: {status} | {duration}ms | {time}', diagAgentsFmt: 'agents: {status} | {duration}ms | {time}',
+        diagPollFmt: 'polling: {active} | last success: {last} | interval: {sec}s', pollOn: 'on', pollOff: 'off',
+        diagWsFmt: 'WS readyState: {state} | last error: {err} | last handshake: {time}', diagWsCloseFmt: 'WS close: code={code} reason={reason}',
+        reqFail: 'Request failed',
+        needQuestion: 'Please enter a consultation question first',
+        panelCleared: 'Parsed panel has been cleared',
+        noParsedDoc: 'No parsed case records found for this case', loadedLatest: 'Latest parsed record loaded (Doc ID {id})', confirmSaved: 'Parsed result confirmed and saved (ID {id})', loadFailed: 'Load failed', confirmFailed: 'Confirm save failed', recentCasesEmpty: 'No recent cases', recentCasesFail: 'Failed to load case list', switchedCase: 'Switched case: {id}',
+        submitOk: 'Discussion submitted. {count} responses generated ({picked} confirmed items included, docs context:{docsOn} docs={docCount})', on: 'on', off: 'off', submitFail: 'Submit failed',
+        reviewOk: 'Round-2 review complete, {count} events added', reviewFail: 'Round-2 review failed',
+        addAgentOk: 'Agent {id} created (model: {model}); suggested skills: {skills}', addFail: 'Create agent failed', none: 'none',
+        modelMissingAgent: 'Model update failed: missing agent_id', modelUpdated: 'Updated {id} model to {model}', modelUpdateFail: 'Model update failed',
+        feedTextOk: 'Injected text knowledge into {id}', feedFail: 'Knowledge feed failed', feedUrlOk: 'Injected URL knowledge into {id}', feedUrlFail: 'URL injection failed',
+        selectKnowledgeFile: 'Please select a knowledge file first', feedFileOk: 'Injected file knowledge into {id}', feedFileFail: 'File injection failed',
+        caseImportProfileSaved: 'Case import profile saved ({caseId})', caseImportProfileLoaded: 'Case import profile loaded ({caseId})', caseImportProfileFail: 'Case import profile operation failed', caseImportDone: 'Case URL imported, extracted imaging {imaging}, labs {labs}, meds {meds}', caseImportFail: 'Case URL import failed',
+        selectCaseFile: 'Please select a case file first', caseUploadDone: 'Case file uploaded, extracted imaging {imaging}, labs {labs}, meds {meds}', caseUploadFail: 'Case file import failed',
+        defaultModelOpt: 'Default model ({model})',
+        needCaseId: 'Please enter case ID first',
+        modelsFallback: 'Model list uses fallback config: {note}',
+        agentsListFmt: 'Current Agents ({count}): {agents}', saveModel: 'Save',
+        conflictFail: 'Load conflict graph failed', roundStateTitle: 'Iteration State', roundStateFmt: 'Current round: {round} | Open conflicts: {conflicts} | Unified: {unified}', yes: 'Yes', no: 'No',
+        modelsLoadOk: 'Model list loaded', modelsLoadFail: 'Model list load failed', agentsLoadOk: 'Agent list loaded', agentsLoadFail: 'Agent list load failed',
+        wsInit: 'Initializing (WebSocket preferred)', wsInitHint: 'Using same-origin API/WS; append ?api=http://host:port if reverse-proxy path differs', initDonePartial: 'Initialization done (model list failed, retry manually)',
+        wsConnectingState: 'WebSocket connecting...', wsOpen: 'WebSocket connected (realtime)', wsHandshakeTimeout: 'WebSocket handshake timeout (fallback to polling)', wsError: 'WebSocket error (fallback to polling)', wsClosedFmt: 'WebSocket closed ({reason}, fallback to polling)', speakerEmpty: 'No speaker data for current case / 暂无当前病例专家发言', consensusEmpty: 'No consensus points for current case / 暂无共识曲线数据', conflictEmpty: 'No conflict edges for current case / 暂无冲突关系数据',
+        loadReport: 'Generate/Refresh Report', copyReport: 'Copy Report', reportEmpty: 'No report data', reportCopied: 'Report copied', reportLoadFail: 'Report load failed', sentenceBadge: 'Sentence',
+        basicSummary: 'Case Summary', clinicalQuestion: 'Clinical Question', summaryText: 'Summary', patientSummary: 'Patient Summary', expertOpinions: 'Expert Opinions', disputeProcess: 'Disputes & Convergence', convergenceTimeline: 'Convergence Timeline', finalConsensus: 'Final Consensus', actionItems: 'Action Items', actions: 'Actions',
+        generateMinutes: 'Generate Minutes', exportMinutesPdf: 'Export PDF', minutesEmpty: 'No minutes data', minutesGenerated: 'Minutes generated', minutesLoadFail: 'Minutes load failed', minutesExportHint: 'Please generate minutes first',
+        minutesBasicInfo: 'Basic Info', minutesKeyDisputes: 'Key Disputes', minutesFinalConsensus: 'Final Consensus', minutesExecution: 'Execution Suggestions', minutesRiskFollowup: 'Risks & Follow-up', minutesTimeline: 'Timeline Summary', minutesParticipants: 'Participants',
+        resolutionEmpty: 'No conflict resolution generated yet', resolutionNoConflict: 'No active conflict. Proceed with current consensus and monitor.', resolutionLoadFail: 'Failed to generate conflict resolution', conflictItem: 'Conflict', involvedExperts: 'Experts', evidenceDiff: 'Evidence Gap', recommendedActions: 'Recommended Actions',
+      }
+    };
+
+    let currentLang = localStorage.getItem('mdt_lang') || 'zh';
+    if (!['zh', 'en'].includes(currentLang)) currentLang = 'zh';
+
+    function tr(key, vars = {}) {
+      const dict = I18N[currentLang] || I18N.zh;
+      const fallback = I18N.zh[key] || key;
+      const tpl = dict[key] || fallback;
+      return String(tpl).replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? `{${k}}`));
+    }
+
+    function applyI18n() {
+      document.documentElement.lang = currentLang === 'zh' ? 'zh-CN' : 'en';
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (key) el.textContent = tr(key);
+      });
+      document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+        const key = el.getAttribute('data-i18n-ph');
+        if (key) el.placeholder = tr(key);
+      });
+      document.title = tr('pageTitle');
+      const zhBtn = document.getElementById('lang-zh');
+      const enBtn = document.getElementById('lang-en');
+      zhBtn.classList.toggle('active', currentLang === 'zh');
+      enBtn.classList.toggle('active', currentLang === 'en');
+      updateDiagnostics();
+      renderSectionPanel();
+      renderRoom();
+      roundStateEl.textContent = tr('roundStateFmt', { round: '-', conflicts: '-', unified: '-' });
+      renderCharts();
+    }
+
+    function setLanguage(lang) {
+      if (!['zh', 'en'].includes(lang)) return;
+      currentLang = lang;
+      localStorage.setItem('mdt_lang', lang);
+      applyI18n();
+      refreshRecentCases().catch(() => {});
+    }
+
+    function setWsState(text, level = 'warn') {
+      wsState.textContent = text;
+      wsState.classList.remove('ok', 'warn', 'bad');
+      wsState.classList.add(level);
+    }
+
+    function setStatusText(text) { statusEl.textContent = text; }
+
+    const BASE_HOST = location.hostname || '127.0.0.1';
+    const PAGE_PROTO = location.protocol;
+    const WS_PROTO = PAGE_PROTO === 'https:' ? 'wss' : 'ws';
+    const urlParams = new URLSearchParams(location.search);
+    const API_OVERRIDE = urlParams.get('api');
+    const IS_LOCAL = ['127.0.0.1', 'localhost'].includes(BASE_HOST);
+    const IS_FILE_SCHEME = PAGE_PROTO === 'file:';
+    const API = API_OVERRIDE || (IS_FILE_SCHEME ? 'http://127.0.0.1:8788' : `${PAGE_PROTO}//${location.host}`);
+    const IS_BACKEND_ORIGIN = !API_OVERRIDE;
+    const WS_BASE = API_OVERRIDE ? API_OVERRIDE.replace(/^http/i, WS_PROTO) : API.replace(/^http/i, WS_PROTO);
+    const WS_URL = `${WS_BASE.replace(/\/$/, '')}/ws/events`;
+    let ws = null;
+    const wsState = document.getElementById('wsState');
+    const statusEl = document.getElementById('status');
+    const timeline = document.getElementById('timeline');
+    const roundStateEl = document.getElementById('roundState');
+    const room = document.getElementById('room');
+    const reportBody = document.getElementById('reportBody');
+    const reportMeta = document.getElementById('reportMeta');
+    const minutesBody = document.getElementById('minutesBody');
+    const minutesMeta = document.getElementById('minutesMeta');
+    const conflictResolutionBody = document.getElementById('conflictResolutionBody');
+    const conflictResolutionMeta = document.getElementById('conflictResolutionMeta');
+    const diagApi = document.getElementById('diagApi');
+    const diagModels = document.getElementById('diagModels');
+    const diagAgents = document.getElementById('diagAgents');
+    const diagPoll = document.getElementById('diagPoll');
+    const diagWs = document.getElementById('diagWs');
+    const diagWsClose = document.getElementById('diagWsClose');
+
+    let currentCaseEvents = [];
+    let currentMinutesData = null;
+    const speakerChart = echarts.init(document.getElementById('speakerChart'));
+    const consensusChart = echarts.init(document.getElementById('consensusChart'));
+    const conflictChart = echarts.init(document.getElementById('conflictChart'));
+    let availableModels = [];
+    let defaultModel = 'openai-codex/gpt-5.3-codex';
+    let pingTimer = null;
+    let pollTimer = null;
+    let wsConnectTimeout = null;
+    let wsReconnectTimer = null;
+    let wsReconnectAttempt = 0;
+    let forcePolling = false;
+    const seenEventIds = new Set();
+    const wsReconnectDelays = [1000, 2000, 5000, 5000, 5000];
+    const pollBackoffDelays = [3000, 5000, 8000];
+    let pollBackoffIndex = 0;
+    const diagState = {
+      models: { status: '-', durationMs: '-', at: '-' },
+      agents: { status: '-', durationMs: '-', at: '-' },
+      pollLastSuccess: '-',
+      wsReadyState: 'UNSET',
+      wsLastError: '-',
+      wsCloseCode: '-',
+      wsCloseReason: '-',
+      wsLastHandshakeAt: '-',
+      pollActive: false,
+    };
+
+    const AGENT_PERSONA = {
+      'mdt-orchestrator': { emoji: '🎯', title_zh: '会诊主持人', title_en: 'Orchestrator', vibe: '冷静统筹型' },
+      'mdt-id': { emoji: '🦠', title_zh: '感染科主任', title_en: 'ID Specialist', vibe: '耐药策略型' },
+      'mdt-micro': { emoji: '🧫', title_zh: '微生物专家', title_en: 'Microbiology', vibe: '证据谨慎型' },
+      'mdt-pharm': { emoji: '💊', title_zh: '临床药师', title_en: 'Clinical Pharmacist', vibe: '剂量精算型' },
+      'mdt-icu': { emoji: '🫀', title_zh: 'ICU医生', title_en: 'ICU Specialist', vibe: '高危监护型' },
+      'mdt-evidence': { emoji: '📚', title_zh: '循证秘书', title_en: 'Evidence Officer', vibe: '文献归纳型' },
+      'mdt-radiology': { emoji: '🩻', title_zh: '影像科医生', title_en: 'Radiology', vibe: '征象判读型' },
+      'mdt-lab': { emoji: '🧪', title_zh: '检验科医生', title_en: 'Lab Specialist', vibe: '指标趋势型' },
+      'human_clinician': { emoji: '👨‍⚕️', title_zh: '临床医生', title_en: 'Clinician', vibe: '病例提出者' },
+    };
+
+    const seats = [
+      { id: 'mdt-orchestrator', x: 50, y: 12, label_zh: '主持人', label_en: 'Host' },
+      { id: 'mdt-id', x: 18, y: 28, label_zh: '感染科', label_en: 'ID' },
+      { id: 'mdt-micro', x: 82, y: 28, label_zh: '微生物', label_en: 'Micro' },
+      { id: 'mdt-pharm', x: 18, y: 72, label_zh: '药学', label_en: 'Pharm' },
+      { id: 'mdt-icu', x: 82, y: 72, label_zh: 'ICU', label_en: 'ICU' },
+      { id: 'mdt-evidence', x: 50, y: 88, label_zh: '循证秘书', label_en: 'Evidence' },
+      { id: 'human_clinician', x: 50, y: 50, label_zh: '临床输入', label_en: 'Clinical Input' },
+    ];
+    const seatState = new Map();
+
+    const SECTION_KEYS = ['imaging', 'labs', 'medications'];
+    const DEFAULT_ROUND1_TASK_TEMPLATE = '请先进一步明确诊断，结合切片复核原诊断是否准确，给出支持/反对证据、关键鉴别诊断、下一步最小必要检查。';
+    const sectionPanelState = { imaging: [], labs: [], medications: [] };
+
+    function renderRoom() {
+      room.innerHTML = `<div class="meeting-table">${tr('meetingTable')}</div>`;
+      seats.forEach(s => {
+        const st = seatState.get(s.id) || { cls: '', text: tr('standby') };
+        const div = document.createElement('div');
+        div.className = `seat ${st.cls}`;
+        div.style.left = s.x + '%';
+        div.style.top = s.y + '%';
+        const p = AGENT_PERSONA[s.id] || { emoji: '🤖', title_zh: s.label_zh || s.id, title_en: s.label_en || s.id, vibe: '通用专家' };
+        const title = currentLang === 'en' ? p.title_en : p.title_zh;
+        div.innerHTML = `
+          <div class="avatar" title="${p.vibe}">${p.emoji}</div>
+          <div class="name">${title}</div>
+          <div class="muted" style="font-size:11px">${s.id}</div>
+          <div class="bubble">${st.text}</div>
+        `;
+        room.appendChild(div);
+      });
+    }
+
+    function formatTime(ts) {
+      if (!ts) return '-';
+      const d = new Date(ts);
+      if (Number.isNaN(d.getTime())) return '-';
+      return d.toLocaleTimeString();
+    }
+
+    function wsReadyStateLabel(state) {
+      switch (state) {
+        case WebSocket.CONNECTING: return 'CONNECTING';
+        case WebSocket.OPEN: return 'OPEN';
+        case WebSocket.CLOSING: return 'CLOSING';
+        case WebSocket.CLOSED: return 'CLOSED';
+        default: return String(state);
+      }
+    }
+
+    function updateDiagnostics() {
+      diagApi.textContent = tr('diagApiFmt', { api: API });
+      diagModels.textContent = tr('diagModelsFmt', { status: diagState.models.status, duration: diagState.models.durationMs, time: formatTime(diagState.models.at) });
+      diagAgents.textContent = tr('diagAgentsFmt', { status: diagState.agents.status, duration: diagState.agents.durationMs, time: formatTime(diagState.agents.at) });
+      diagPoll.textContent = tr('diagPollFmt', { active: diagState.pollActive ? tr('pollOn') : tr('pollOff'), last: formatTime(diagState.pollLastSuccess), sec: pollBackoffDelays[pollBackoffIndex] / 1000 });
+      diagWs.textContent = tr('diagWsFmt', { state: diagState.wsReadyState, err: diagState.wsLastError, time: formatTime(diagState.wsLastHandshakeAt) });
+      diagWsClose.textContent = tr('diagWsCloseFmt', { code: diagState.wsCloseCode, reason: diagState.wsCloseReason || '-' });
+    }
+
+    function toErrorMessage(err, contextKey = 'reqFail') {
+      const context = tr(contextKey);
+      if (!err) return context;
+      if (err.message) return `${context}: ${err.message}`;
+      return `${context}: ${String(err)}`;
+    }
+
+    async function requestWithMeta(path, options = {}, metaKey = '') {
+      const started = performance.now();
+      try {
+        const resp = await fetch(`${API}${path}`, options);
+        const durationMs = Math.round(performance.now() - started);
+        let data = null;
+        try { data = await resp.json(); } catch (_) { data = null; }
+
+        if (metaKey && diagState[metaKey]) {
+          diagState[metaKey] = { status: `HTTP ${resp.status}`, durationMs, at: Date.now() };
+          updateDiagnostics();
+        }
+
+        if (!resp.ok) {
+          const detail = data?.message || data?.detail || JSON.stringify(data || {});
+          throw new Error(`HTTP ${resp.status}: ${detail}`);
+        }
+        return { data, status: resp.status, durationMs };
+      } catch (e) {
+        const durationMs = Math.round(performance.now() - started);
+        if (metaKey && diagState[metaKey]) {
+          diagState[metaKey] = { status: e?.message || 'request error', durationMs, at: Date.now() };
+          updateDiagnostics();
+        }
+        throw e;
+      }
+    }
+
+    function normalizeSectionItems(items) {
+      return (items || []).map(it => (typeof it === 'string' ? { text: it, confirmed: true } : { text: String(it?.text || ''), confirmed: Boolean(it?.confirmed) }))
+        .filter(it => it.text.trim().length > 0);
+    }
+
+    function renderSectionColumn(key) {
+      const box = document.getElementById(`section-${key}`);
+      const err = document.getElementById(`err-${key}`);
+      if (!box || !err) return;
+      err.textContent = '';
+      const list = sectionPanelState[key] || [];
+      if (!list.length) {
+        box.innerHTML = `<div class="empty-tip">${tr('emptyItems')}</div>`;
+        return;
+      }
+      box.innerHTML = '';
+      list.forEach((item, idx) => {
+        const node = document.createElement('div');
+        node.className = 'section-item';
+        node.innerHTML = `
+          <textarea placeholder="${currentLang === 'en' ? 'Enter item text...' : '请输入条目内容'}">${item.text || ''}</textarea>
+          <div class="item-row">
+            <label class="check-inline">
+              <input type="checkbox" ${item.confirmed ? 'checked' : ''} />
+              ${tr('confirmAdopt')}
+            </label>
+            <button class="item-del" onclick="removeSectionItem('${key}', ${idx})">${tr('delete')}</button>
+          </div>
+        `;
+        const ta = node.querySelector('textarea');
+        const ck = node.querySelector('input[type="checkbox"]');
+        ta.addEventListener('input', () => {
+          sectionPanelState[key][idx].text = ta.value;
+          if (!ta.value.trim()) err.textContent = tr('emptyItemWarn');
+        });
+        ck.addEventListener('change', () => { sectionPanelState[key][idx].confirmed = ck.checked; });
+        box.appendChild(node);
+      });
+    }
+
+    function renderSectionPanel() { SECTION_KEYS.forEach(renderSectionColumn); }
+
+    function applySections(sections = {}) {
+      SECTION_KEYS.forEach(key => { sectionPanelState[key] = normalizeSectionItems(sections[key] || []).map(it => ({ ...it })); });
+      renderSectionPanel();
+    }
+
+    function addSectionItem(key) { sectionPanelState[key].push({ text: '', confirmed: true }); renderSectionColumn(key); }
+    function removeSectionItem(key, idx) { sectionPanelState[key].splice(idx, 1); renderSectionColumn(key); }
+
+    function resetSectionPanel() {
+      SECTION_KEYS.forEach(key => { sectionPanelState[key] = []; });
+      renderSectionPanel();
+      setStatusText(tr('panelCleared'));
+    }
+
+    function getConfirmedSectionsPayload() {
+      const payload = {};
+      SECTION_KEYS.forEach(key => {
+        payload[key] = (sectionPanelState[key] || [])
+          .map(it => ({ text: String(it.text || '').trim(), confirmed: Boolean(it.confirmed) }))
+          .filter(it => it.text.length > 0);
+      });
+      return payload;
+    }
+
+    async function loadLatestParsedSections() {
+      const caseId = document.getElementById('caseId').value.trim();
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/parsed`);
+        if (!data.latest_doc && !data.confirmation) {
+          resetSectionPanel();
+          setStatusText(tr('noParsedDoc'));
+          return;
+        }
+        applySections(data.effective_sections || {});
+        const refId = data.confirmation?.id || data.latest_doc?.doc_id || '-';
+        setStatusText(tr('loadedLatest', { id: refId }));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'loadFailed'));
+      }
+    }
+
+    async function confirmParsedSections() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      try {
+        const { data: parsed } = await requestWithMeta(`/cases/${caseId}/parsed`);
+        const payload = {
+          ...getConfirmedSectionsPayload(),
+          source_doc_id: parsed?.latest_doc?.doc_id || null,
+          confirmed_by: 'frontend-user',
+        };
+        const { data } = await requestWithMeta(`/cases/${caseId}/parsed/confirm`, {
+          method: 'POST', headers: {'content-type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        setStatusText(tr('confirmSaved', { id: data.confirmation_id }));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'confirmFailed'));
+      }
+    }
+
+    async function refreshRecentCases() {
+      const select = document.getElementById('recentCaseSelect');
+      try {
+        const { data } = await requestWithMeta('/cases/recent?limit=30');
+        const items = data.cases || [];
+        select.innerHTML = '';
+        if (!items.length) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = tr('recentCasesEmpty');
+          select.appendChild(opt);
+          return;
+        }
+        items.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.case_id;
+          opt.textContent = `${c.case_id} (${c.event_count || 0})`;
+          select.appendChild(opt);
+        });
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'recentCasesFail'));
+      }
+    }
+
+    async function applySelectedCase() {
+      const select = document.getElementById('recentCaseSelect');
+      const caseId = (select.value || '').trim();
+      if (!caseId) return;
+      document.getElementById('caseId').value = caseId;
+      setStatusText(tr('switchedCase', { id: caseId }));
+      clearCaseScopedState();
+      clearReportView();
+      await loadCaseImportProfile();
+      await loadLatestParsedSections();
+      await loadEventsFallback();
+    }
+
+    function updateSeat(ev) {
+      const id = ev.speaker;
+      if (!id) return;
+      let cls = 'speaking';
+      if (ev.event_type === 'agent_review') cls = 'review';
+      if (ev.event_type === 'conflict_detected') cls = 'conflict';
+      const text = (ev.payload && (ev.payload.discussion || ev.payload.review || ev.payload.summary || ev.payload.text))
+        ? String(ev.payload.discussion || ev.payload.review || ev.payload.summary || ev.payload.text).slice(0, 38)
+        : ev.event_type;
+      seatState.set(id, { cls, text });
+      if (!seats.find(x => x.id === id)) {
+        const pos = [15,30,45,60,75,90][(seats.length - 7) % 6];
+        seats.push({ id, x: pos, y: 50, label_zh: id, label_en: id });
+      }
+      renderRoom();
+    }
+
+
+    function summarizeEventPayload(payload = {}, eventType = '') {
+      const assessment = Array.isArray(payload.assessment) ? payload.assessment : (payload.assessment ? [payload.assessment] : []);
+      const actions = Array.isArray(payload.actions) ? payload.actions : (payload.actions ? [payload.actions] : []);
+      if (assessment.length || actions.length) {
+        return `${assessment.slice(0, 1).join('；')} ${actions.length ? ('→ ' + actions.slice(0, 1).join('；')) : ''}`.trim();
+      }
+      return String(payload.discussion || payload.review || payload.summary || payload.text || eventType || '').slice(0, 220);
+    }
+
+
+    function updateRoundState() {
+      const consensusEvents = currentCaseEvents.filter(e => e.event_type === 'consensus_updated' || e.event_type === 'final_consensus');
+      if (!consensusEvents.length) {
+        roundStateEl.textContent = tr('roundStateFmt', { round: '-', conflicts: '-', unified: '-' });
+        return;
+      }
+      const latest = consensusEvents.sort((a,b)=>(a.event_id||0)-(b.event_id||0)).slice(-1)[0];
+      const p = latest.payload || {};
+      const roundNo = latest.round_no ?? '-';
+      const conflicts = p.open_conflicts ?? p.disagree_count ?? '-';
+      const unified = (p.is_unified === true || latest.event_type === 'final_consensus') ? tr('yes') : tr('no');
+      roundStateEl.textContent = tr('roundStateFmt', { round: roundNo, conflicts, unified });
+    }
+
+    function renderTimeline() {
+      timeline.innerHTML = '';
+      const sorted = [...currentCaseEvents].sort((a, b) => (a.event_id || 0) - (b.event_id || 0));
+      sorted.forEach(ev => {
+        const div = document.createElement('div');
+        const isSentence = ev.event_type === 'expert_sentence';
+        div.className = isSentence ? 'ev full' : 'ev';
+        if (isSentence) {
+          const payload = ev.payload || {};
+          const text = payload.text || '';
+          const stance = payload.stance ? ` | ${payload.stance}` : '';
+          div.innerHTML = `
+            <span class='badge'>${tr('sentenceBadge')}</span>
+            <b>${ev.speaker}</b>${stance}
+            <div class='muted'>${ev.timestamp} | round=${ev.round_no} | conf=${ev.confidence ?? '-'}</div>
+            <div class='sentence'>${text}</div>
+          `;
+        } else {
+          div.innerHTML = `<b>${ev.event_type}</b> · ${ev.speaker}<div class='muted'>${ev.timestamp} | round=${ev.round_no} | conf=${ev.confidence ?? '-'}</div><div class='muted'>${summarizeEventPayload(ev.payload || {}, ev.event_type)}</div>`;
+        }
+        timeline.prepend(div);
+      });
+      updateRoundState();
+    }
+
+    function clearCaseScopedState() {
+      currentCaseEvents = [];
+      timeline.innerHTML = '';
+      seenEventIds.clear();
+      seatState.clear();
+      renderRoom();
+      roundStateEl.textContent = tr('roundStateFmt', { round: '-', conflicts: '-', unified: '-' });
+      renderCharts();
+      renderConflictResolution(null);
+    }
+
+    function clearReportView() {
+      if (reportBody) reportBody.innerHTML = `<div class="empty-tip">${tr('reportEmpty')}</div>`;
+      if (reportMeta) reportMeta.textContent = '-';
+      if (minutesBody) minutesBody.innerHTML = `<div class="empty-tip">${tr('minutesEmpty')}</div>`;
+      if (minutesMeta) minutesMeta.textContent = '-';
+      currentMinutesData = null;
+    }
+
+    function recomputeAnalytics() {
+      const speakerCounter = {};
+      const consensusSeries = [];
+      const conflictEdges = [];
+      const conflictNodes = new Set();
+
+      currentCaseEvents.forEach(ev => {
+        if (ev.event_type === 'agent_opinion' || ev.event_type === 'agent_review') {
+          speakerCounter[ev.speaker] = (speakerCounter[ev.speaker] || 0) + 1;
+        }
+        if (ev.event_type === 'consensus_updated') {
+          const score = Number(ev?.payload?.consensus_score ?? ev?.payload?.confidence ?? ev?.confidence);
+          if (!Number.isNaN(score)) consensusSeries.push({ t: String(ev.timestamp || '').slice(11, 19), v: score });
+        }
+        if (ev.event_type === 'agent_review') {
+          const stance = String(ev?.payload?.stance || '').toLowerCase();
+          if (stance === 'support' || stance === 'oppose') {
+            const from = ev.speaker;
+            const to = ev?.payload?.target_speaker || 'unknown';
+            conflictNodes.add(from); conflictNodes.add(to);
+            conflictEdges.push({ from, to, stance });
+          }
+        }
+      });
+
+      speakerChart.setOption({
+        tooltip: {},
+        xAxis: { type: 'category', data: Object.keys(speakerCounter), axisLabel: { color: '#b8c8f2' } },
+        yAxis: { type: 'value', axisLabel: { color: '#b8c8f2' } },
+        series: [{ type: 'bar', data: Object.values(speakerCounter), itemStyle: { color: '#6ea8fe' } }],
+        graphic: Object.keys(speakerCounter).length ? [] : [{ type: 'text', left: 'center', top: 'middle', style: { text: tr('speakerEmpty'), fill: '#9eabd6', fontSize: 14 } }]
+      }, true);
+
+      consensusChart.setOption({
+        tooltip: {},
+        xAxis: { type: 'category', data: consensusSeries.map(x => x.t), axisLabel: { color: '#b8c8f2' } },
+        yAxis: { type: 'value', min: 0, max: 1, axisLabel: { color: '#b8c8f2' } },
+        series: [{ type: 'line', smooth: true, data: consensusSeries.map(x => x.v), lineStyle: { color: '#2ecc71' } }],
+        graphic: consensusSeries.length ? [] : [{ type: 'text', left: 'center', top: 'middle', style: { text: tr('consensusEmpty'), fill: '#9eabd6', fontSize: 14 } }]
+      }, true);
+
+      const nodes = [...conflictNodes].map((id, i) => ({ id, name: id, value: i, symbolSize: 44 }));
+      const links = conflictEdges.map(e => ({
+        source: e.from,
+        target: e.to,
+        lineStyle: { color: e.stance === 'oppose' ? '#ff5f6d' : '#2ecc71', width: 2 },
+        label: { show: true, formatter: e.stance }
+      }));
+      conflictChart.setOption({
+        tooltip: {},
+        series: [{ type: 'graph', layout: 'force', roam: true, label: { show: true, color: '#dbe6ff' }, data: nodes, links }],
+        graphic: links.length ? [] : [{ type: 'text', left: 'center', top: 'middle', style: { text: tr('conflictEmpty'), fill: '#9eabd6', fontSize: 14 } }]
+      }, true);
+    }
+
+    function renderCharts() { recomputeAnalytics(); }
+
+    function addEvent(ev) {
+      if (!ev || ev.case_id !== document.getElementById('caseId').value.trim()) return;
+      if (typeof ev.event_id !== 'undefined') {
+        if (seenEventIds.has(ev.event_id)) return;
+        seenEventIds.add(ev.event_id);
+      }
+      currentCaseEvents.push(ev);
+      renderTimeline();
+      renderCharts();
+      updateSeat(ev);
+    }
+
+    function clearPing() { if (pingTimer) clearInterval(pingTimer); pingTimer = null; }
+    function scheduleNextPoll(delayMs = pollBackoffDelays[pollBackoffIndex]) { if (pollTimer) clearTimeout(pollTimer); pollTimer = setTimeout(loadEventsFallback, delayMs); updateDiagnostics(); }
+    function startPollingFallback() { diagState.pollActive = true; scheduleNextPoll(0); }
+    function stopPollingFallback() { if (pollTimer) clearTimeout(pollTimer); pollTimer = null; pollBackoffIndex = 0; diagState.pollActive = false; updateDiagnostics(); }
+
+    async function loadEventsFallback() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { scheduleNextPoll(); return; }
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/events`);
+        const events = data?.events || [];
+        currentCaseEvents = [];
+        seenEventIds.clear();
+        events.forEach(ev => { seenEventIds.add(ev.event_id); currentCaseEvents.push(ev); updateSeat(ev); });
+        renderTimeline();
+        renderCharts();
+        pollBackoffIndex = 0;
+        diagState.pollLastSuccess = Date.now();
+      } catch (_) {
+        pollBackoffIndex = Math.min(pollBackoffIndex + 1, pollBackoffDelays.length - 1);
+      } finally {
+        scheduleNextPoll();
+      }
+    }
+
+    function renderReportContent(report) {
+      if (!report) {
+        clearReportView();
+        return;
+      }
+      const basic = report.basic_case_summary || {};
+      const patientSummary = basic.patient_summary || {};
+      const summaryText = basic.summary_text || '';
+      const clinicalQuestion = basic.clinical_question || '';
+
+      const opinionList = (report.expert_opinions || []).map(op => `
+        <div class="report-card">
+          <div class="muted">Round ${op.round_no ?? '-'} · ${op.speaker || '-'} ${op.specialty ? `(${op.specialty})` : ''} · ${op.timestamp || '-'}</div>
+          <div class="sentence">${op.text || ''}</div>
+        </div>
+      `).join('') || `<div class="empty-tip">${tr('reportEmpty')}</div>`;
+
+      const disputeList = (report.disputes || []).map(d => `<li>${d.round_no ?? '-'} / ${d.speaker || '-'}：${d.summary || ''}</li>`).join('') || `<li>${tr('reportEmpty')}</li>`;
+      const convergenceList = (report.convergence_timeline || []).map(c => `<li>${c.round_no ?? '-'} · ${c.event_type || ''} · ${c.summary || ''} · score=${c.consensus_score ?? '-'} · conflicts=${c.open_conflicts ?? '-'}</li>`).join('') || `<li>${tr('reportEmpty')}</li>`;
+      const finalConsensus = report.final_consensus || {};
+      const checklist = report.mdt_checklist || {};
+      const actionItems = (report.action_items || []).map(a => `<li>${a}</li>`).join('') || `<li>${tr('reportEmpty')}</li>`;
+
+      reportBody.innerHTML = `
+        <h4>${tr('basicSummary')}</h4>
+        <div class="report-card">
+          <div><b>${tr('clinicalQuestion')}</b> ${clinicalQuestion || '-'}</div>
+          <div><b>${tr('summaryText')}</b> ${summaryText || '-'}</div>
+          <div><b>${tr('patientSummary')}</b> ${JSON.stringify(patientSummary)}</div>
+          <div><b>source_case_url:</b> ${basic.source_case_url || '-'}</div>
+          <div><b>slide_urls:</b> ${(basic.slide_urls || []).join(' ; ') || '-'}</div>
+          <div><b>initial_diagnosis:</b> ${basic.initial_diagnosis || '-'}</div>
+          <div><b>round1_task_template:</b> ${basic.round1_task_template || '-'}</div>
+        </div>
+        <h4>${tr('expertOpinions')}</h4>
+        ${opinionList}
+        <h4>${tr('disputeProcess')}</h4>
+        <ul class="report-list">${disputeList}</ul>
+        <h4>${tr('convergenceTimeline')}</h4>
+        <ul class="report-list">${convergenceList}</ul>
+        <h4>${tr('finalConsensus')}</h4>
+        <div class="report-card">
+          <div>${finalConsensus.summary || '-'}</div>
+          <div class="muted">score=${finalConsensus.consensus_score ?? '-'} · round=${finalConsensus.round_no ?? '-'} · ${finalConsensus.timestamp || '-'}</div>
+          <div><b>${tr('actions')}</b> ${(finalConsensus.actions || []).join('；') || '-'}</div>
+        </div>
+        <h4>MDT Checklist</h4>
+        <ul class="report-list">
+          <li>病例完整性: ${checklist.case_completeness || '-'}</li>
+          <li>影像/病理证据充分性: ${checklist.evidence_sufficiency || '-'}</li>
+          <li>鉴别诊断: ${checklist.differential_diagnosis || '-'}</li>
+          <li>共识等级: ${checklist.consensus_level || '-'}</li>
+          <li>执行与随访计划: ${checklist.execution_followup_plan || '-'}</li>
+        </ul>
+        <h4>${tr('actionItems')}</h4>
+        <ul class="report-list">${actionItems}</ul>
+      `;
+
+      if (reportMeta) {
+        reportMeta.textContent = `${report.case_id} · ${report.generated_at} · ${report.case_status}`;
+      }
+    }
+
+    function listToHtml(items = []) {
+      const arr = (items || []).filter(x => String(x || '').trim());
+      if (!arr.length) return `<div class="empty-tip">-</div>`;
+      return `<ul class="report-list">${arr.map(x => `<li>${x}</li>`).join('')}</ul>`;
+    }
+
+    function renderMinutesContent(minutesWrap) {
+      const minutes = minutesWrap?.minutes;
+      if (!minutesBody || !minutesMeta) return;
+      if (!minutes) {
+        minutesBody.innerHTML = `<div class="empty-tip">${tr('minutesEmpty')}</div>`;
+        minutesMeta.textContent = '-';
+        return;
+      }
+      currentMinutesData = minutesWrap;
+      const m = minutes.minutes || {};
+      const basic = m.basic_info || {};
+      const participants = (m.participants || []).map(p => `${p.speaker}${p.specialty ? ` (${p.specialty})` : ''} · n=${p.event_count ?? '-'}`);
+      minutesMeta.textContent = `${minutes.case_id} · fp=${minutes.content_fingerprint || '-'} · events=${minutes.source_event_count ?? '-'} · ${minutes.generated_at || '-'}`;
+      minutesBody.innerHTML = `
+        <div class="minutes-section"><h5>${tr('minutesBasicInfo')}</h5>
+          <div><b>case_id:</b> ${basic.case_id || '-'}</div>
+          <div><b>status:</b> ${basic.case_status || '-'}</div>
+          <div><b>${tr('clinicalQuestion')}:</b> ${basic.clinical_question || '-'}</div>
+          <div><b>${tr('patientSummary')}:</b> ${JSON.stringify(basic.patient_summary || {})}</div>
+        </div>
+        <div class="minutes-section"><h5>${tr('minutesKeyDisputes')}</h5>${listToHtml(m.key_disputes)}</div>
+        <div class="minutes-section"><h5>${tr('minutesFinalConsensus')}</h5>${listToHtml(m.final_consensus)}</div>
+        <div class="minutes-section"><h5>${tr('minutesExecution')}</h5>${listToHtml(m.execution_suggestions)}</div>
+        <div class="minutes-section"><h5>${tr('minutesRiskFollowup')}</h5>${listToHtml(m.risks_and_followup)}</div>
+        <div class="minutes-section"><h5>MDT Checklist</h5>${listToHtml(m.mdt_checklist)}</div>
+        <div class="minutes-section"><h5>${tr('minutesTimeline')}</h5>${listToHtml(m.timeline_summary)}</div>
+        <div class="minutes-section"><h5>${tr('minutesParticipants')}</h5>${listToHtml(participants)}</div>
+      `;
+    }
+
+    async function loadCaseMinutes() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/minutes`);
+        renderMinutesContent(data.minutes);
+        setStatusText(tr('minutesGenerated'));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'minutesLoadFail'));
+      }
+    }
+
+    function exportMinutesPdf() {
+      if (!currentMinutesData || !currentMinutesData.minutes) {
+        setStatusText(tr('minutesExportHint'));
+        return;
+      }
+      const html = minutesBody?.innerHTML || '';
+      const meta = minutesMeta?.textContent || '';
+      const title = `${currentMinutesData.minutes.case_id || 'MDT'}-minutes`;
+      const win = window.open('', '_blank');
+      if (!win) return;
+      win.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>${title}</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1{font-size:20px;margin:0 0 6px}.meta{font-size:12px;color:#555;margin-bottom:12px}.minutes-section{border:1px solid #ddd;border-radius:8px;padding:10px;margin-bottom:10px}ul{margin:0;padding-left:20px}li{margin:3px 0}@media print{@page{size:A4;margin:14mm}}</style></head><body><h1>MDT Minutes</h1><div class="meta">${meta}</div>${html}</body></html>`);
+      win.document.close();
+      win.focus();
+      setTimeout(() => win.print(), 200);
+    }
+
+    function renderConflictResolution(data) {
+      if (!conflictResolutionBody || !conflictResolutionMeta) return;
+      if (!data) {
+        conflictResolutionMeta.textContent = '-';
+        conflictResolutionBody.innerHTML = `<div class="empty-tip">${tr('resolutionEmpty')}</div>`;
+        return;
+      }
+
+      conflictResolutionMeta.textContent = `${data.case_id} · priority=${data.priority || '-'} · confidence=${data.confidence ?? '-'} · conflicts=${(data.conflicts || []).length}`;
+      if (!data.has_conflict) {
+        conflictResolutionBody.innerHTML = `<div class="empty-tip">${data.message || tr('resolutionNoConflict')}</div>`;
+        return;
+      }
+
+      const cards = (data.recommendations || []).map((rec, idx) => {
+        const conflict = (data.conflicts || []).find(c => c.conflict_id === rec.conflict_id) || {};
+        const acts = (rec.actions || []).map((a, i) => `
+          <li><b>${a.action_type}</b> | owner=${a.owner} | ${a.deadline_hint}<br/>${a.rationale}</li>
+        `).join('') || `<li>-</li>`;
+        return `
+          <div class="report-card">
+            <div><b>${tr('conflictItem')} ${idx + 1}</b> · priority=${rec.priority || '-'} · confidence=${rec.confidence ?? '-'}</div>
+            <div><b>${tr('summaryText')}</b> ${rec.dispute_point || conflict.dispute_point || '-'}</div>
+            <div><b>${tr('involvedExperts')}</b> ${(conflict.involved_experts || []).join(', ') || '-'}</div>
+            <div><b>${tr('evidenceDiff')}</b> ${conflict.evidence_diff || '-'}</div>
+            <div style="margin-top:6px;"><b>${tr('recommendedActions')}</b></div>
+            <ul class="report-list">${acts}</ul>
+          </div>
+        `;
+      }).join('');
+
+      conflictResolutionBody.innerHTML = cards || `<div class="empty-tip">${tr('resolutionEmpty')}</div>`;
+    }
+
+    async function generateConflictResolution() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/conflict-resolution`, {
+          method: 'POST',
+          headers: {'content-type': 'application/json'},
+          body: JSON.stringify({
+            max_actions_per_conflict: 3,
+            extra_context: document.getElementById('msg').value.trim() || '',
+          })
+        });
+        renderConflictResolution(data);
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'resolutionLoadFail'));
+      }
+    }
+
+    async function loadCaseReport() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/report`);
+        renderReportContent(data.report);
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'reportLoadFail'));
+      }
+    }
+
+    async function copyReport() {
+      if (!reportBody || !reportBody.textContent) return;
+      try {
+        await navigator.clipboard.writeText(reportBody.textContent);
+        setStatusText(tr('reportCopied'));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'reportLoadFail'));
+      }
+    }
+
+    function scheduleWSReconnect() {
+      if (forcePolling) return;
+      if (wsReconnectTimer) return;
+      const delay = wsReconnectDelays[Math.min(wsReconnectAttempt, wsReconnectDelays.length - 1)];
+      wsReconnectTimer = setTimeout(() => { wsReconnectTimer = null; connectWS(); }, delay);
+    }
+
+    function connectWS() {
+      if (forcePolling) return;
+      if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+      setWsState(tr('wsConnectingState'), 'warn');
+      diagState.wsReadyState = 'CONNECTING';
+      updateDiagnostics();
+
+      ws = new WebSocket(WS_URL);
+
+      if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
+      wsConnectTimeout = setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.CONNECTING) {
+          diagState.wsLastError = 'handshake_timeout(3s)';
+          setWsState(tr('wsHandshakeTimeout'), 'bad');
+          startPollingFallback();
+          updateDiagnostics();
+          try { ws.close(4000, 'handshake timeout'); } catch (_) {}
+        }
+      }, 3000);
+
+      ws.onopen = () => {
+        if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
+        wsReconnectAttempt = 0;
+        diagState.wsReadyState = wsReadyStateLabel(ws.readyState);
+        diagState.wsLastError = '-';
+        diagState.wsCloseCode = '-';
+        diagState.wsCloseReason = '-';
+        diagState.wsLastHandshakeAt = Date.now();
+        setWsState(tr('wsOpen'), 'ok');
+        stopPollingFallback();
+        clearPing();
+        try { ws.send(JSON.stringify({ type: 'ping', ts: Date.now() })); } catch (_) {}
+        pingTimer = setInterval(() => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          try { ws.send(JSON.stringify({ type: 'ping', ts: Date.now() })); } catch (_) {}
+        }, 15000);
+        updateDiagnostics();
+      };
+
+      ws.onerror = (evt) => {
+        if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
+        diagState.wsReadyState = wsReadyStateLabel(ws?.readyState);
+        diagState.wsLastError = evt?.message || 'WebSocket onerror';
+        setWsState(tr('wsError'), 'bad');
+        startPollingFallback();
+        updateDiagnostics();
+      };
+
+      ws.onclose = (evt) => {
+        if (wsConnectTimeout) clearTimeout(wsConnectTimeout);
+        clearPing();
+        diagState.wsReadyState = 'CLOSED';
+        diagState.wsCloseCode = evt?.code ?? '-';
+        diagState.wsCloseReason = evt?.reason || '-';
+        const reasonText = `code=${diagState.wsCloseCode} reason=${diagState.wsCloseReason}`;
+        setWsState(tr('wsClosedFmt', { reason: reasonText }), 'bad');
+        startPollingFallback();
+        wsReconnectAttempt += 1;
+        updateDiagnostics();
+        scheduleWSReconnect();
+      };
+
+      ws.onmessage = (msg) => {
+        let payload = null;
+        try { payload = JSON.parse(msg.data); } catch (_) { return; }
+        if (payload.type === 'mdt_event') { addEvent(payload.data); return; }
+        if (payload.type === 'pong') {
+          diagState.wsLastHandshakeAt = Date.now();
+          updateDiagnostics();
+        }
+      };
+    }
+
+    async function submitDiscussion() {
+      const caseId = document.getElementById('caseId').value.trim();
+      const message = document.getElementById('msg').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      if (!message) { setStatusText(tr('needQuestion')); return; }
+      const confirmedSections = getConfirmedSectionsPayload();
+      try {
+        await requestWithMeta('/cases/import', {
+          method: 'POST', headers: {'content-type': 'application/json'},
+          body: JSON.stringify({
+            case_id: caseId,
+            patient_summary: {note: 'interactive case'},
+            source_case_url: document.getElementById('sourceCaseUrl').value.trim() || null,
+            slide_urls: parseSlideUrlsText(),
+            initial_diagnosis: document.getElementById('initialDiagnosis').value.trim() || null,
+            round1_task_template: document.getElementById('round1TaskTemplate').value.trim() || DEFAULT_ROUND1_TASK_TEMPLATE,
+          })
+        });
+        const { data } = await requestWithMeta('/discussion/submit', {
+          method: 'POST', headers: {'content-type': 'application/json'},
+          body: JSON.stringify({
+            case_id: caseId,
+            round_no: 1,
+            speaker: 'human_clinician',
+            message,
+            confirmed_sections: confirmedSections,
+            enable_docs_context: document.getElementById('enableDocsContext').checked,
+          })
+        });
+        const picked = Object.values(confirmedSections).reduce((n, arr) => n + (arr || []).filter(x => x.confirmed).length, 0);
+        setStatusText(tr('submitOk', { count: data.generated_count, picked, docsOn: data.docs_context_enabled ? tr('on') : tr('off'), docCount: data.docs_context_doc_count ?? 0 }));
+        await refreshRecentCases();
+        await loadEventsFallback();
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'submitFail'));
+      }
+    }
+
+    async function runReviewRound() {
+      const caseId = document.getElementById('caseId').value.trim();
+      try {
+        const { data } = await requestWithMeta('/discussion/review', {
+          method: 'POST', headers: {'content-type':'application/json'},
+          body: JSON.stringify({case_id: caseId, from_round: 1, to_round: 2})
+        });
+        setStatusText(tr('reviewOk', { count: data.generated_count }));
+        await loadEventsFallback();
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'reviewFail'));
+      }
+    }
+
+    async function createAgent() {
+      const agent_id = document.getElementById('newAgentId').value.trim();
+      const role = document.getElementById('newAgentRole').value.trim();
+      const specialty = document.getElementById('newAgentSpec').value.trim();
+      const model = document.getElementById('newAgentModel').value.trim();
+      const prompt = document.getElementById('newAgentPrompt').value.trim();
+      try {
+        const { data } = await requestWithMeta('/agents', {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({agent_id, role, specialty, model, prompt, auto_learn_web: true})
+        });
+        setStatusText(tr('addAgentOk', { id: agent_id, model: data.model || tr('defaultModelOpt', { model: defaultModel }), skills: (data.skill_suggestions || []).join(', ') || tr('none') }));
+        await loadAgents();
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'addFail'));
+      }
+    }
+
+    async function updateAgentModel(agent_id, model) {
+      const targetAgent = (agent_id || '').trim();
+      const targetModel = typeof model === 'string' ? model.trim() : '';
+      if (!targetAgent) { setStatusText(tr('modelMissingAgent')); return; }
+      try {
+        const { data } = await requestWithMeta(`/agents/${targetAgent}/model`, {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({model: targetModel})
+        });
+        setStatusText(tr('modelUpdated', { id: targetAgent, model: data.model || tr('defaultModelOpt', { model: defaultModel }) }));
+        await loadAgents();
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'modelUpdateFail'));
+      }
+    }
+
+    async function feedKnowledge() {
+      const agent_id = document.getElementById('feedAgentId').value.trim();
+      const source = document.getElementById('feedSource').value.trim() || 'manual';
+      const content = document.getElementById('feedContent').value.trim();
+      try {
+        await requestWithMeta(`/agents/${agent_id}/knowledge`, {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({source, content, tags:[]})
+        });
+        setStatusText(tr('feedTextOk', { id: agent_id }));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'feedFail'));
+      }
+    }
+
+    async function feedKnowledgeUrl() {
+      const agent_id = document.getElementById('feedAgentId').value.trim();
+      const url = document.getElementById('feedUrl').value.trim();
+      try {
+        await requestWithMeta(`/agents/${agent_id}/knowledge/url`, {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({url, source:'url'})
+        });
+        setStatusText(tr('feedUrlOk', { id: agent_id }));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'feedUrlFail'));
+      }
+    }
+
+    async function feedKnowledgeFile() {
+      const agent_id = document.getElementById('feedAgentId').value.trim();
+      const f = document.getElementById('feedFile').files[0];
+      if (!f) { setStatusText(tr('selectKnowledgeFile')); return; }
+      const fd = new FormData();
+      fd.append('file', f);
+      fd.append('tags', 'file,upload');
+      try {
+        await requestWithMeta(`/agents/${agent_id}/knowledge/upload`, { method:'POST', body: fd });
+        setStatusText(tr('feedFileOk', { id: agent_id }));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'feedFileFail'));
+      }
+    }
+
+    function parseSlideUrlsText() {
+      return (document.getElementById('slideUrls').value || '')
+        .split(/\n+/)
+        .map(x => x.trim())
+        .filter(Boolean);
+    }
+
+    function applyCaseImportProfile(data = {}) {
+      document.getElementById('sourceCaseUrl').value = data.source_case_url || '';
+      document.getElementById('slideUrls').value = (data.slide_urls || []).join('\n');
+      document.getElementById('initialDiagnosis').value = data.initial_diagnosis || '';
+      document.getElementById('round1TaskTemplate').value = data.round1_task_template || DEFAULT_ROUND1_TASK_TEMPLATE;
+    }
+
+    async function saveCaseImportProfile() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      try {
+        const payload = {
+          case_id: caseId,
+          patient_summary: { note: 'interactive case import' },
+          source_case_url: document.getElementById('sourceCaseUrl').value.trim() || null,
+          slide_urls: parseSlideUrlsText(),
+          initial_diagnosis: document.getElementById('initialDiagnosis').value.trim() || null,
+          round1_task_template: document.getElementById('round1TaskTemplate').value.trim() || DEFAULT_ROUND1_TASK_TEMPLATE,
+          mdt_checklist: {
+            case_completeness: 'pending',
+            evidence_sufficiency: 'pending',
+            differential_diagnosis: 'pending',
+            consensus_level: 'pending',
+            execution_followup_plan: 'pending',
+          },
+        };
+        const { data } = await requestWithMeta('/cases/import', {
+          method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload)
+        });
+        applyCaseImportProfile(data);
+        setStatusText(tr('caseImportProfileSaved', { caseId: caseId }));
+        await refreshRecentCases();
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'caseImportProfileFail'));
+      }
+    }
+
+    async function loadCaseImportProfile() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/profile`);
+        applyCaseImportProfile(data || {});
+        setStatusText(tr('caseImportProfileLoaded', { caseId: caseId }));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'caseImportProfileFail'));
+      }
+    }
+
+    async function uploadCaseDocUrl() {
+      const caseId = document.getElementById('caseId').value.trim();
+      const url = document.getElementById('caseDocUrl').value.trim();
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/documents/url`, {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({url, source:'url'})
+        });
+        applySections(data.sections || {});
+        setStatusText(tr('caseImportDone', { imaging: (data.sections?.imaging||[]).length, labs: (data.sections?.labs||[]).length, meds: (data.sections?.medications||[]).length }));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'caseImportFail'));
+      }
+    }
+
+    async function uploadCaseDocFile() {
+      const caseId = document.getElementById('caseId').value.trim();
+      const f = document.getElementById('caseDocFile').files[0];
+      if (!f) { setStatusText(tr('selectCaseFile')); return; }
+      const fd = new FormData();
+      fd.append('file', f);
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/documents/upload`, { method:'POST', body: fd });
+        applySections(data.sections || {});
+        setStatusText(tr('caseUploadDone', { imaging: (data.sections?.imaging||[]).length, labs: (data.sections?.labs||[]).length, meds: (data.sections?.medications||[]).length }));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'caseUploadFail'));
+      }
+    }
+
+    function modelOptionsHtml(selectedValue = '') {
+      const selected = (selectedValue || '').trim();
+      const opts = [`<option value="">${tr('defaultModelOpt', { model: defaultModel })}</option>`];
+      (availableModels || []).forEach(m => {
+        const safe = String(m || '');
+        const sel = safe === selected ? 'selected' : '';
+        opts.push(`<option value="${safe}" ${sel}>${safe}</option>`);
+      });
+      return opts.join('');
+    }
+
+    async function loadAvailableModels() {
+      const { data } = await requestWithMeta('/models/available', {}, 'models');
+      availableModels = (data.models || []).map(x => String(x || '').trim()).filter(Boolean);
+      defaultModel = String(data.default_model || defaultModel);
+
+      const newAgentModel = document.getElementById('newAgentModel');
+      newAgentModel.innerHTML = modelOptionsHtml('');
+      if (data.fallback) setStatusText(tr('modelsFallback', { note: data.note || 'fallback' }));
+    }
+
+    async function saveAgentModel(agentId, inputId) {
+      const model = document.getElementById(inputId).value.trim();
+      try {
+        const { data } = await requestWithMeta(`/agents/${agentId}/model`, {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({ model })
+        });
+        setStatusText(tr('modelUpdated', { id: agentId, model: data.model || tr('defaultModelOpt', { model: defaultModel }) }));
+        await loadAgents();
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'modelUpdateFail'));
+      }
+    }
+
+    async function loadAgents() {
+      const { data } = await requestWithMeta('/agents', {}, 'agents');
+      document.getElementById('agentsList').textContent = tr('agentsListFmt', {
+        count: data.count,
+        agents: data.agents.map(a => `${a.agent_id}[${a.specialty}]`).join(' | ')
+      });
+
+      const modelBox = document.getElementById('agentModelList');
+      modelBox.innerHTML = '';
+      data.agents.forEach((a, i) => {
+        if (!seats.find(s => s.id === a.agent_id)) {
+          const posX = [10, 22, 34, 66, 78, 90][i % 6];
+          seats.push({ id: a.agent_id, x: posX, y: 10 + ((Math.floor(i/6)%3) * 36), label_zh: a.specialty || a.agent_id, label_en: a.specialty || a.agent_id });
+        }
+
+        const row = document.createElement('div');
+        row.className = 'agent-model-row';
+        const inputId = `agent-model-${a.agent_id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+        row.innerHTML = `
+          <select id="${inputId}">${modelOptionsHtml(a.model || '')}</select>
+          <button onclick="saveAgentModel('${a.agent_id}', '${inputId}')">${tr('saveModel')}</button>
+        `;
+        modelBox.appendChild(row);
+      });
+
+      renderRoom();
+    }
+
+    async function loadConflictGraph() {
+      try {
+        renderCharts();
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'conflictFail'));
+      }
+    }
+
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.onclick = () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const id = tab.dataset.tab;
+        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+        document.getElementById(`view-${id}`).classList.add('active');
+      };
+    });
+
+    async function retryLoadModels() {
+      try {
+        await loadAvailableModels();
+        await loadAgents();
+        setStatusText(tr('modelsLoadOk'));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'modelsLoadFail'));
+      }
+    }
+
+    async function retryLoadAgents() {
+      try {
+        await loadAgents();
+        setStatusText(tr('agentsLoadOk'));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'agentsLoadFail'));
+      }
+    }
+
+    async function initPage() {
+      applyI18n();
+      renderRoom();
+      renderSectionPanel();
+      updateDiagnostics();
+      document.getElementById('round1TaskTemplate').value = DEFAULT_ROUND1_TASK_TEMPLATE;
+
+      setWsState(tr('wsInit'), 'warn');
+      stopPollingFallback();
+      connectWS();
+      if (!IS_LOCAL && !API_OVERRIDE) setStatusText(tr('wsInitHint'));
+
+      Promise.allSettled([loadAvailableModels()]).then(async (results) => {
+        const failed = results.filter(r => r.status === 'rejected').length;
+        try { await loadAgents(); } catch (_) {}
+        try { await refreshRecentCases(); } catch (_) {}
+        try { await loadCaseImportProfile(); } catch (_) {}
+        try { await loadEventsFallback(); } catch (_) {}
+        if (failed > 0) setStatusText(tr('initDonePartial'));
+      });
+    }
+
+    initPage();
+  </script>
+</body>
+</html>

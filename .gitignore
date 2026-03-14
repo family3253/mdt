@@ -1,0 +1,14 @@
+backend/.venv/
+backend/__pycache__/
+backend/mdt.db
+
+# runtime artifacts
+.run/
+*.pid
+*.log
+
+# optional large deps
+vendor/**/node_modules/
+
+# vendor repos are managed separately (sub-repos); do not commit their sources here
+vendor/

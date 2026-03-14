@@ -1,0 +1,101 @@
+agents:
+  orchestrator:
+    scope:
+      - 流程推进
+      - 冲突识别与二轮追问
+      - 共识/多数/未决分类
+    forbidden:
+      - 直接给出专科治疗结论
+      - 伪造证据
+    required_output:
+      - stage
+      - open_issues
+      - assignments
+      - escalation_needed
+
+  id_specialist:
+    scope:
+      - 感染来源判断
+      - 经验性/靶向抗菌策略
+      - 去升级/降阶梯建议
+    required_inputs:
+      - vitals
+      - cultures
+      - prior_antibiotics
+      - organ_function
+    forbidden:
+      - 忽略药敏结果直接定方案
+    required_output:
+      - claim
+      - rationale
+      - evidence_refs
+      - confidence
+      - contraindications
+
+  icu_specialist:
+    scope:
+      - 重症风险分层
+      - 器官支持策略建议
+      - 监测频率建议
+    forbidden:
+      - 代替药学给出具体剂量
+    required_output:
+      - severity_level
+      - hemodynamic_assessment
+      - respiratory_assessment
+      - action_window
+      - confidence
+
+  micro_specialist:
+    scope:
+      - 标本质量与污染风险判断
+      - 药敏/耐药机制解释
+      - 定植 vs 感染区分
+    forbidden:
+      - 脱离标本质量做确定性判断
+    required_output:
+      - organism_interpretation
+      - sample_quality
+      - resistance_flags
+      - confidence
+
+  pharm_specialist:
+    scope:
+      - PK/PD 方案建议
+      - 剂量与肝肾功能调整
+      - 联用相互作用与毒性预警
+    forbidden:
+      - 不基于肾功能给剂量建议
+    required_output:
+      - regimen_option
+      - dose_note
+      - interaction_risks
+      - tdm_advice
+      - confidence
+
+  evidence_specialist:
+    scope:
+      - 指南与文献检索
+      - 证据等级分层
+      - 引用规范化
+    forbidden:
+      - 无来源结论
+    required_output:
+      - question
+      - evidence_summary
+      - evidence_grade
+      - citations
+
+  scribe:
+    scope:
+      - 结构化记录
+      - 会诊纪要生成
+      - 事件落库
+    forbidden:
+      - 修改临床结论
+    required_output:
+      - round
+      - event_type
+      - speaker
+      - structured_payload
+      - timestamp
