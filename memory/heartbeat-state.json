@@ -8,8 +8,8 @@
     "qqbot",
     "feishu"
   ],
-  "lastGlobalHeartbeatCheckAt": "2026-03-15T02:40:00+08:00",
-  "lastGlobalHeartbeatCheckResult": "status: channels OK (telegram/qqbot/feishu). gateway service running and probe connect ok, but status shows unreachable because missing scope operator.read; gateway status/probe warns service uses nvm node path; recommend doctor --repair + operator.read pairing.",
+  "lastGlobalHeartbeatCheckAt": "2026-03-15T03:10:00+08:00",
+  "lastGlobalHeartbeatCheckResult": "status recheck: channels OK; gateway still reported unreachable due to missing scope operator.read. Cooldown active (<2h since last auto-fix at 02:40), so no further auto-restart attempted.",
   "lastGlobalHeartbeatCheckChannels": [
     "telegram",
     "qqbot",
