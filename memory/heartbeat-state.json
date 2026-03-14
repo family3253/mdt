@@ -8,8 +8,8 @@
     "qqbot",
     "feishu"
   ],
-  "lastGlobalHeartbeatCheckAt": "2026-03-15T03:40:00+08:00",
-  "lastGlobalHeartbeatCheckResult": "status recheck: unchanged; channels OK; gateway still flagged unreachable due to missing scope operator.read. Cooldown active (no restart).",
+  "lastGlobalHeartbeatCheckAt": "2026-03-15T04:10:00+08:00",
+  "lastGlobalHeartbeatCheckResult": "status recheck: unchanged; channels OK; gateway still flagged unreachable due to missing scope operator.read. Cooldown period has elapsed since 02:40, but issue is scope/identity; no restart attempted.",
   "lastGlobalHeartbeatCheckChannels": [
     "telegram",
     "qqbot",
