@@ -1,0 +1,14 @@
+[Unit]
+Description=Wenxian auto-push watcher (polling)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/chenyechao/.openclaw/workspace
+ExecStart=/home/chenyechao/.openclaw/workspace/scripts/wenxian_autopush_poll.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
