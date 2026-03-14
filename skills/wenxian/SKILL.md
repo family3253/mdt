@@ -31,8 +31,8 @@ EasyScholar 开放接口补充：
 - 接口：`https://www.easyscholar.cc/open/getPublicationRank`
 - 参数：`secretKey`、`publicationName`
 - 示例：
-  - `.../getPublicationRank?secretKey=f11d8449e9024ccdb3358bfe53518d95&publicationName=Nature`
-- 当前配置 secretKey：`f11d8449e9024ccdb3358bfe53518d95`
+  - `.../getPublicationRank?secretKey=<EASYSCHOLAR_SECRET_KEY>&publicationName=Nature`
+- 当前配置 secretKey：`<请在本地私密配置，不要写入仓库>`
 - 关键返回字段（`data.officialRank.all`）：
   - `sci`（SCI/JCR分区）
   - `sciif`（最新IF）
@@ -141,7 +141,7 @@ EasyScholar 返回解析（必须遵循）：
 
 ## PubMed 配置（本地执行）
 
-- API Key：`6abcd4bf8005d31965b29690db0539779b08`
+- API Key：`<PUBMED_API_KEY>`
 - 调用建议：在 PubMed 请求中附带 `api_key` 以提升配额与稳定性。
 - 安全约束：该 key 仅用于本地运行，不对外展示、不写入公开仓库。
 
