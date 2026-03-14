@@ -16,11 +16,16 @@ python3 /home/chenyechao/.openclaw/workspace/scripts/aether_gpt_pool_maintain.py
   --aether-base http://127.0.0.1:8084 \
   --aether-email "${AETHER_EMAIL}" \
   --aether-password "${AETHER_PASSWORD}" \
-  --provider-id e4efb41c-1956-44e1-9c00-986e5cae12f6 \
+  --aether-token "${AETHER_TOKEN}" \
+  --provider-id 81e53f4e-b0fb-48d1-9466-ea54013fec1e \
   --proxy-node-id d91042e8-bb66-4e0f-9eef-53ac2ba2c137 \
-  --target-keys 20 \
+  --target-keys 200 \
   --cleanup-limit 20 \
   --import-limit 20 \
+  --oauth-callback-url "${AETHER_OAUTH_CALLBACK_URL:-}" \
+  --oauth-email-domain "${AETHER_OAUTH_EMAIL_DOMAIN:-cyc3253.org}" \
+  --oauth-timeout-sec "${AETHER_OAUTH_TIMEOUT_SEC:-300}" \
   --safe \
+  ${AETHER_FALLBACK_TO_EXISTING_CPA:+--fallback-to-existing-cpa} \
   ${DRY} \
   --log-file /home/chenyechao/.openclaw/workspace/memory/aether-maintain-last.json

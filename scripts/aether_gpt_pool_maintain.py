@@ -2,9 +2,13 @@
 import argparse
 import json
 import os
+import secrets
+import string
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Tuple
+from urllib.parse import urlparse, parse_qs
 
 import requests
 
@@ -53,7 +57,9 @@ def load_protect_list(path: str) -> set:
     return items
 
 
-def aether_login(base: str, email: str, password: str) -> str:
+def aether_login(base: str, email: str, password: str, token: str | None = None) -> str:
+    if token:
+        return token
     r = requests.post(f"{base}/api/auth/login", json={"email": email, "password": password}, timeout=20)
     r.raise_for_status()
     return r.json()["access_token"]
@@ -108,7 +114,6 @@ def list_cpa_codex_tokens(cpa_base: str, mgmt_key: str) -> List[Dict]:
             continue
 
         exp_ts = parse_any_ts(obj.get("expires") or obj.get("expired") or obj.get("oauth_expires_at"))
-        # 只保留未过期（预留 10 分钟缓冲）
         if exp_ts is not None and exp_ts <= now + 600:
             continue
 
@@ -119,12 +124,96 @@ def list_cpa_codex_tokens(cpa_base: str, mgmt_key: str) -> List[Dict]:
                 "refresh_token": rt,
                 "last_refresh": parse_any_ts(obj.get("last_refresh") or f.get("last_refresh")) or 0,
                 "expires_at": exp_ts,
+                "source": "cpa_existing",
             }
         )
 
-    # 最近刷新优先
     out.sort(key=lambda x: int(x.get("last_refresh") or 0), reverse=True)
     return out
+
+
+def rand_local_part(n: int = 12) -> str:
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(n))
+
+
+def create_candidate_email(domain: str) -> str:
+    return f"{rand_local_part()}@{domain}"
+
+
+def request_codex_oauth_url(cpa_base: str, mgmt_key: str) -> Dict:
+    h = {"Authorization": f"Bearer {mgmt_key}"}
+    r = requests.get(f"{cpa_base}/v0/management/codex-auth-url", headers=h, timeout=60)
+    r.raise_for_status()
+    obj = r.json() if isinstance(r.json(), dict) else {}
+    return {"url": obj.get("url"), "state": obj.get("state")}
+
+
+def wait_cpa_oauth_done(cpa_base: str, mgmt_key: str, state: str, timeout_sec: int = 300) -> Dict:
+    h = {"Authorization": f"Bearer {mgmt_key}"}
+    deadline = time.time() + timeout_sec
+    last = {"status": "wait"}
+    while time.time() < deadline:
+        r = requests.get(f"{cpa_base}/v0/management/get-auth-status", headers=h, params={"state": state}, timeout=30)
+        r.raise_for_status()
+        obj = r.json() if isinstance(r.json(), dict) else {"status": "wait"}
+        last = obj
+        st = str(obj.get("status") or "").lower()
+        if st in {"ok", "error"}:
+            return obj
+        time.sleep(2)
+    return {"status": "error", "error": f"timeout waiting oauth state={state}", "last": last}
+
+
+def pick_new_codex_auth_file(cpa_base: str, mgmt_key: str, before_paths: set[str], state: str | None = None) -> Dict | None:
+    h = {"Authorization": f"Bearer {mgmt_key}"}
+    r = requests.get(f"{cpa_base}/v0/management/auth-files", headers=h, timeout=60)
+    r.raise_for_status()
+    files = r.json().get("files", [])
+    cands = []
+    for f in files:
+        if (f.get("provider") != "codex" and f.get("type") != "codex") or f.get("disabled"):
+            continue
+        p = f.get("path")
+        if not p or p in before_paths or not os.path.exists(p):
+            continue
+        try:
+            obj = json.loads(Path(p).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        rt = (obj.get("refresh_token") or "").strip()
+        if not rt:
+            continue
+        cands.append(
+            {
+                "email": (obj.get("email") or f.get("email") or f.get("account") or "").strip(),
+                "refresh_token": rt,
+                "last_refresh": parse_any_ts(obj.get("last_refresh") or f.get("last_refresh")) or 0,
+                "expires_at": parse_any_ts(obj.get("expires") or obj.get("expired") or obj.get("oauth_expires_at")),
+                "path": p,
+                "source": "cpa_new_oauth",
+                "state": state,
+            }
+        )
+    cands.sort(key=lambda x: int(x.get("last_refresh") or 0), reverse=True)
+    return cands[0] if cands else None
+
+
+def parse_callback_url(url: str) -> Dict[str, str]:
+    q = parse_qs(urlparse(url).query)
+    return {k: (v[0] if isinstance(v, list) and v else "") for k, v in q.items()}
+
+
+def submit_oauth_callback(cpa_base: str, mgmt_key: str, callback_url: str) -> Dict:
+    h = {"Authorization": f"Bearer {mgmt_key}"}
+    payload = parse_callback_url(callback_url)
+    payload["callback_url"] = callback_url
+    r = requests.post(f"{cpa_base}/v0/management/oauth-callback", headers=h, json=payload, timeout=60)
+    try:
+        body = r.json()
+    except Exception:
+        body = {"raw": r.text[:500]}
+    return {"status": r.status_code, "body": body}
 
 
 def should_cleanup_401(key: Dict) -> bool:
@@ -176,7 +265,8 @@ def main():
     ap.add_argument("--cpa-mgmt-key", required=True)
     ap.add_argument("--aether-base", default="http://127.0.0.1:8084")
     ap.add_argument("--aether-email", required=True)
-    ap.add_argument("--aether-password", required=True)
+    ap.add_argument("--aether-password", required=False, default="")
+    ap.add_argument("--aether-token", default="")
     ap.add_argument("--provider-id", required=True)
     ap.add_argument("--target-keys", type=int, default=30)
     ap.add_argument("--protect-list", default="/home/chenyechao/.openclaw/workspace/configs/aether-gpt-protect-list.txt")
@@ -184,6 +274,10 @@ def main():
     ap.add_argument("--safe", action="store_true", help="safe mode: no deletion, capped import")
     ap.add_argument("--import-limit", type=int, default=20)
     ap.add_argument("--cleanup-limit", type=int, default=20)
+    ap.add_argument("--oauth-callback-url", default="", help="manual callback url captured after browser oauth")
+    ap.add_argument("--oauth-email-domain", default="cyc3253.org", help="virtual domain label for newly created candidates")
+    ap.add_argument("--oauth-timeout-sec", type=int, default=300)
+    ap.add_argument("--fallback-to-existing-cpa", action="store_true", help="fallback to existing CPA refresh tokens when no new oauth callback is provided")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--log-file", default="/home/chenyechao/.openclaw/workspace/memory/aether-maintain-last.json")
     args = ap.parse_args()
@@ -195,7 +289,7 @@ def main():
         "proxy_node_id": args.proxy_node_id or None,
     }
 
-    token = aether_login(args.aether_base, args.aether_email, args.aether_password)
+    token = aether_login(args.aether_base, args.aether_email, args.aether_password, args.aether_token or None)
     keys_before = get_gpt_keys(args.aether_base, token, args.provider_id)
     summary["before_key_count"] = len(keys_before)
 
@@ -239,16 +333,50 @@ def main():
             existing_emails.add(n.replace("codex_", "", 1))
 
     selected = []
-    for item in all_tokens:
-        email = str(item.get("email") or "").strip()
-        if email and (email in existing_emails or email in protect):
-            continue
-        selected.append(item)
-        if len(selected) >= need:
-            break
+    oauth_flow = {
+        "requested": False,
+        "mode": None,
+        "state": None,
+        "candidate_email": None,
+        "callback_submit": None,
+        "status": None,
+        "new_auth_file": None,
+    }
 
+    if need > 0:
+        before_paths = {str(x.get("path") or "") for x in all_tokens if x.get("path")}
+        callback_url = (args.oauth_callback_url or "").strip()
+        if callback_url:
+            oauth_flow["requested"] = True
+            oauth_flow["mode"] = "manual_callback"
+            oauth_req = request_codex_oauth_url(args.cpa_base, args.cpa_mgmt_key)
+            oauth_flow["state"] = oauth_req.get("state")
+            oauth_flow["candidate_email"] = create_candidate_email(args.oauth_email_domain)
+            oauth_flow["callback_submit"] = submit_oauth_callback(args.cpa_base, args.cpa_mgmt_key, callback_url)
+            oauth_flow["status"] = wait_cpa_oauth_done(args.cpa_base, args.cpa_mgmt_key, oauth_req.get("state") or "", args.oauth_timeout_sec)
+            new_auth = pick_new_codex_auth_file(args.cpa_base, args.cpa_mgmt_key, before_paths, oauth_req.get("state"))
+            oauth_flow["new_auth_file"] = {"email": new_auth.get("email"), "path": new_auth.get("path")} if new_auth else None
+            if new_auth:
+                selected.append(new_auth)
+        elif args.fallback_to_existing_cpa:
+            oauth_flow["requested"] = False
+            oauth_flow["mode"] = "fallback_existing_cpa"
+
+    if len(selected) < need and args.fallback_to_existing_cpa:
+        for item in all_tokens:
+            email = str(item.get("email") or "").strip()
+            if email and (email in existing_emails or email in protect):
+                continue
+            if any(str(x.get("refresh_token") or "") == str(item.get("refresh_token") or "") for x in selected):
+                continue
+            selected.append(item)
+            if len(selected) >= need:
+                break
+
+    summary["oauth_flow"] = oauth_flow
     summary["selected_for_import"] = len(selected)
     summary["selected_accounts_sample"] = [x.get("email") for x in selected[:10]]
+    summary["selected_sources"] = [x.get("source") for x in selected[:10]]
 
     import_result = {"status": None, "total": 0, "success": 0, "failed": 0, "top_errors": []}
     if need > 0 and selected and not args.dry_run:
