@@ -9,7 +9,7 @@ const cache = new Map()
 
 const PORT = Number(process.env.PORT || 19190)
 const HOST = process.env.HOST || '0.0.0.0'
-const OPENCLAW_BIN = process.env.OPENCLAW_BIN || 'openclaw'
+const OPENCLAW_BIN = process.env.OPENCLAW_BIN || '/home/chenyechao/.npm-global/bin/openclaw'
 const APP_ORIGIN = process.env.APP_ORIGIN || '*'
 
 app.use(cors({ origin: APP_ORIGIN === '*' ? true : APP_ORIGIN }))
