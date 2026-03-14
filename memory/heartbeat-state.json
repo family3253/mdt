@@ -8,8 +8,8 @@
     "qqbot",
     "feishu"
   ],
-  "lastGlobalHeartbeatCheckAt": "2026-03-15T04:40:00+08:00",
-  "lastGlobalHeartbeatCheckResult": "status+probe recheck: gateway probe connect ok but RPC limited (missing operator.read). status still reports gateway unreachable due to scope. channels OK. no restart.",
+  "lastGlobalHeartbeatCheckAt": "2026-03-15T07:34:00+08:00",
+  "lastGlobalHeartbeatCheckResult": "status+probe recheck: gateway probe connect ok but RPC limited (missing operator.read). status still reports gateway unreachable due to scope. channels OK. doctor --repair confirmed gateway service entrypoint mismatch and system node missing; openclaw gateway restart attempt earlier got SIGTERM.",
   "lastGlobalHeartbeatCheckChannels": [
     "telegram",
     "qqbot",
