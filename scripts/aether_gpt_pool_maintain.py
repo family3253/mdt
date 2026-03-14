@@ -100,6 +100,10 @@ def list_cpa_codex_tokens(cpa_base: str, mgmt_key: str) -> List[Dict]:
     for f in files:
         if (f.get("provider") != "codex" and f.get("type") != "codex") or f.get("disabled"):
             continue
+        # Skip clearly invalidated oauth tokens reported by CPA
+        msg = str(f.get("status_message") or "")
+        if "token_invalidated" in msg or "token invalidated" in msg or "token_invalid" in msg:
+            continue
         p = f.get("path")
         if not p or not os.path.exists(p):
             continue
