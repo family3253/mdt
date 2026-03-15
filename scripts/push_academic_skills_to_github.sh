@@ -28,6 +28,10 @@ SRC_SKILLS=(
   "$WORKSPACE_DIR/skills/context-master"
   "$WORKSPACE_DIR/skills/task-status"
   "$WORKSPACE_DIR/skills/quadrants"
+
+  # PPT
+  "/home/chenyechao/.openclaw/skills/elite-powerpoint-designer"
+  "/home/chenyechao/.openclaw/skills/powerpoint-automation"
 )
 
 # Extra repo-only wrappers/scripts we want to include
