@@ -1599,6 +1599,19 @@ async def ingest_case_doc_upload(case_id: str, file: UploadFile = File(...)) -> 
     return {"ok": True, **stored}
 
 
+@app.delete("/cases/{case_id}")
+async def delete_case(case_id: str) -> dict[str, Any]:
+    with conn() as c:
+        existed = c.execute("select case_id from cases where case_id=?", (case_id,)).fetchone()
+        if not existed:
+            raise HTTPException(status_code=404, detail="case not found")
+        c.execute("delete from mdt_events where case_id=?", (case_id,))
+        c.execute("delete from mdt_case_docs where case_id=?", (case_id,))
+        c.execute("delete from mdt_case_parsed_confirmations where case_id=?", (case_id,))
+        c.execute("delete from cases where case_id=?", (case_id,))
+    return {"ok": True, "case_id": case_id}
+
+
 @app.post("/discussion/submit")
 async def discussion_submit(payload: DiscussionInput) -> dict[str, Any]:
     """模拟现实 MDT：临床介绍 -> 牵头专家 -> 多学科吸收/质疑 -> 定向追问 -> 共识更新。"""

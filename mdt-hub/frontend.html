@@ -126,6 +126,8 @@
     .btn-primary { background: linear-gradient(180deg, #2d4c9c 0%, #253f83 100%); border-color: #4d74d1; }
     .btn-secondary { background: #1a2341; border-color: #3a4f84; }
     .btn-ghost { background: rgba(18,28,54,.55); border-style: dashed; }
+    .btn-danger { background: rgba(239,68,68,.15); border-color: rgba(239,68,68,.45); color: #fecaca; }
+    .btn-danger:hover { border-color: rgba(239,68,68,.8); }
 
     .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
@@ -268,7 +270,10 @@
           <button class="btn-primary" onclick="submitDiscussion()" data-i18n="submitDiscussion">提交讨论</button>
           <button class="btn-secondary" onclick="runReviewRound()" data-i18n="reviewRound">二轮互评</button>
         </div>
-        <button class="btn-ghost" onclick="loadConflictGraph()" data-i18n="refreshConflict">刷新冲突图</button>
+        <div class="btn-row">
+          <button class="btn-ghost" onclick="loadConflictGraph()" data-i18n="refreshConflict">刷新冲突图</button>
+          <button class="btn-danger" onclick="clearCurrentCase()" data-i18n="clearCase">清空当前病例</button>
+        </div>
       </div>
 
       <div class="panel">
@@ -418,7 +423,7 @@
       zh: {
         pageTitle: 'MDT 会诊控制台', headerTitle: 'MDT 控制台', wsConnecting: '连接中...', statusWaiting: '等待操作',
         diagTitle: '连接诊断', retryModels: '重试加载模型', retryAgents: '重试加载 Agent',
-        consultInput: '会诊输入', msgPlaceholder: '输入临床问题...', refreshCases: '刷新病例', useSelectedCase: '切换到所选病例', enableDocs: '启用病历直读上下文', submitDiscussion: '提交讨论', reviewRound: '二轮互评', refreshConflict: '刷新冲突图',
+        consultInput: '会诊输入', msgPlaceholder: '输入临床问题...', refreshCases: '刷新病例', useSelectedCase: '切换到所选病例', enableDocs: '启用病历直读上下文', submitDiscussion: '提交讨论', reviewRound: '二轮互评', refreshConflict: '刷新冲突图', clearCase: '清空当前病例',
         uploadCaseTitle: '上传病历（文件/网址）', sourceCaseUrlPlaceholder: '原始病例来源 URL', slideUrlsPlaceholder: '切片 URL（每行一个）', initialDiagnosisPlaceholder: '初始诊断', round1TaskTemplatePlaceholder: '首轮任务模板（可编辑）', saveImportProfile: '保存导入信息', loadImportProfile: '加载导入信息', caseDocUrlPlaceholder: '病历网址（支持网页/PDF链接）', importCaseUrl: '导入网址病历', uploadCaseFile: '上传病历文件',
         parsedPanelTitle: '病历解析结果面板（可编辑确认）', parsedPanelHint: '提交会诊前可确认/采纳影像、检验、用药条目',
         imaging: '影像', labs: '检验', medications: '用药', addImaging: '+ 新增影像条目', addLabs: '+ 新增检验条目', addMeds: '+ 新增用药条目',
@@ -438,6 +443,7 @@
         noParsedDoc: '当前病例暂无解析病历', loadedLatest: '已加载最近病历解析结果（文档ID {id}）', confirmSaved: '解析结果已确认写回（ID {id}）', loadFailed: '加载失败', confirmFailed: '确认写回失败', recentCasesEmpty: '暂无历史病例', recentCasesFail: '加载病例列表失败', switchedCase: '已切换病例：{id}',
         submitOk: '已提交讨论，生成 {count} 条响应（已带入确认条目 {picked} 条，病历上下文:{docsOn} 文档{docCount}份）', on: '开', off: '关', submitFail: '提交失败',
         reviewOk: '二轮互评完成，新增 {count} 条事件', reviewFail: '二轮互评失败',
+        clearCaseConfirm: '确认清空病例 {id} 吗？此操作不可恢复。', clearCaseDone: '已清空病例：{id}', clearCaseFail: '清空病例失败',
         addAgentOk: '已新增 {id}（模型: {model}）；推荐技能: {skills}', addFail: '新增失败', none: '无',
         modelMissingAgent: '模型配置失败：缺少 agent_id', modelUpdated: '已更新 {id} 模型为 {model}', modelUpdateFail: '模型更新失败',
         feedTextOk: '已给 {id} 注入文本知识', feedFail: '喂知识失败', feedUrlOk: '已给 {id} 注入网址知识', feedUrlFail: '网址注入失败',
@@ -461,7 +467,7 @@
       en: {
         pageTitle: 'MDT Consultation Console', headerTitle: 'MDT Console', wsConnecting: 'Connecting...', statusWaiting: 'Waiting for actions',
         diagTitle: 'Connectivity Diagnostics', retryModels: 'Retry Models', retryAgents: 'Retry Agents',
-        consultInput: 'Consultation Input', msgPlaceholder: 'Enter clinical question...', refreshCases: 'Refresh Cases', useSelectedCase: 'Switch to Selected Case', enableDocs: 'Enable direct EMR context', submitDiscussion: 'Submit Discussion', reviewRound: 'Round-2 Peer Review', refreshConflict: 'Refresh Conflict Graph',
+        consultInput: 'Consultation Input', msgPlaceholder: 'Enter clinical question...', refreshCases: 'Refresh Cases', useSelectedCase: 'Switch to Selected Case', enableDocs: 'Enable direct EMR context', submitDiscussion: 'Submit Discussion', reviewRound: 'Round-2 Peer Review', refreshConflict: 'Refresh Conflict Graph', clearCase: 'Clear Current Case',
         uploadCaseTitle: 'Upload Case Records (File/URL)', sourceCaseUrlPlaceholder: 'Source case URL', slideUrlsPlaceholder: 'Slide URLs (one per line)', initialDiagnosisPlaceholder: 'Initial diagnosis', round1TaskTemplatePlaceholder: 'Round-1 task template (editable)', saveImportProfile: 'Save import profile', loadImportProfile: 'Load import profile', caseDocUrlPlaceholder: 'Case URL (web/PDF supported)', importCaseUrl: 'Import URL Record', uploadCaseFile: 'Upload Case File',
         parsedPanelTitle: 'Parsed Case Panel (Editable Confirmation)', parsedPanelHint: 'Confirm/adopt imaging, labs and medication items before submission',
         imaging: 'Imaging', labs: 'Labs', medications: 'Medications', addImaging: '+ Add Imaging Item', addLabs: '+ Add Lab Item', addMeds: '+ Add Medication Item',
@@ -481,6 +487,7 @@
         noParsedDoc: 'No parsed case records found for this case', loadedLatest: 'Latest parsed record loaded (Doc ID {id})', confirmSaved: 'Parsed result confirmed and saved (ID {id})', loadFailed: 'Load failed', confirmFailed: 'Confirm save failed', recentCasesEmpty: 'No recent cases', recentCasesFail: 'Failed to load case list', switchedCase: 'Switched case: {id}',
         submitOk: 'Discussion submitted. {count} responses generated ({picked} confirmed items included, docs context:{docsOn} docs={docCount})', on: 'on', off: 'off', submitFail: 'Submit failed',
         reviewOk: 'Round-2 review complete, {count} events added', reviewFail: 'Round-2 review failed',
+        clearCaseConfirm: 'Confirm clearing case {id}? This cannot be undone.', clearCaseDone: 'Cleared case: {id}', clearCaseFail: 'Clear case failed',
         addAgentOk: 'Agent {id} created (model: {model}); suggested skills: {skills}', addFail: 'Create agent failed', none: 'none',
         modelMissingAgent: 'Model update failed: missing agent_id', modelUpdated: 'Updated {id} model to {model}', modelUpdateFail: 'Model update failed',
         feedTextOk: 'Injected text knowledge into {id}', feedFail: 'Knowledge feed failed', feedUrlOk: 'Injected URL knowledge into {id}', feedUrlFail: 'URL injection failed',
@@ -1367,6 +1374,20 @@
         await loadEventsFallback();
       } catch (e) {
         setStatusText(toErrorMessage(e, 'reviewFail'));
+      }
+    }
+
+    async function clearCurrentCase() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      if (!confirm(tr('clearCaseConfirm', { id: caseId }))) return;
+      try {
+        await requestWithMeta(`/cases/${caseId}`, { method: 'DELETE' });
+        setStatusText(tr('clearCaseDone', { id: caseId }));
+        await refreshRecentCases();
+        await loadEventsFallback();
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'clearCaseFail'));
       }
     }
 
