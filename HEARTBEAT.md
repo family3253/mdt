@@ -30,9 +30,11 @@
 - 是否存在 channel state 非 OK
 
 2\. 若命中异常：
-- 先执行 `openclaw sessions cleanup`
-- 再执行 `openclaw gateway restart`
-- 重启后等待 8-12 秒，再执行一次 `openclaw status` 复检
+- **例外（忽略告警）**：若仅出现 `Gateway unreachable (missing scope: operator.read)` 且 `openclaw gateway probe` 显示 Connect ok（仅 scope limited），则视为权限提示，不做 cleanup/restart，并记录为“已忽略”。
+- 其它异常：
+  - 先执行 `openclaw sessions cleanup`
+  - 再执行 `openclaw gateway restart`
+  - 重启后等待 8-12 秒，再执行一次 `openclaw status` 复检
 
 3\. 将处理结果写入 `memory/heartbeat-state.json`：
 - `lastGlobalAutoFixAt`
