@@ -1655,9 +1655,17 @@
         document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
         document.getElementById(`view-${id}`).classList.add('active');
         if (id === 'analytics') {
-          try { renderCharts(); } catch (_) {}
+          try { loadEventsFallback(); } catch (_) {}
+          setTimeout(() => {
+            try { renderCharts(); } catch (_) {}
+            try { speakerChart.resize(); consensusChart.resize(); conflictChart.resize(); } catch (_) {}
+          }, 50);
         }
       };
+    });
+
+    window.addEventListener('resize', () => {
+      try { speakerChart.resize(); consensusChart.resize(); conflictChart.resize(); } catch (_) {}
     });
 
     async function retryLoadModels() {
