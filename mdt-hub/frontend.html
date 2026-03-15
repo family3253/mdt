@@ -566,7 +566,7 @@
     const API_OVERRIDE = urlParams.get('api');
     const IS_LOCAL = ['127.0.0.1', 'localhost'].includes(BASE_HOST);
     const IS_FILE_SCHEME = PAGE_PROTO === 'file:';
-    const API = API_OVERRIDE || (IS_FILE_SCHEME ? 'http://127.0.0.1:8788' : `${PAGE_PROTO}//${location.host}`);
+    const API = API_OVERRIDE || (IS_FILE_SCHEME ? 'http://127.0.0.1:8788' : `http://${BASE_HOST}:8788`);
     const IS_BACKEND_ORIGIN = !API_OVERRIDE;
     const WS_BASE = API_OVERRIDE ? API_OVERRIDE.replace(/^http/i, WS_PROTO) : API.replace(/^http/i, WS_PROTO);
     const WS_URL = `${WS_BASE.replace(/\/$/, '')}/ws/events`;
