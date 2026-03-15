@@ -611,21 +611,25 @@
     };
 
     const AGENT_PERSONA = {
+      'mdt-orchestrator': { emoji: '🎯', title_zh: '会诊主持人', title_en: 'Orchestrator', vibe: '冷静统筹型' },
       'mdt-id': { emoji: '🦠', title_zh: '感染科', title_en: 'ID Specialist', vibe: '病原学证据与抗菌谱匹配' },
       'mdt-icu': { emoji: '🫁', title_zh: '呼吸/重症', title_en: 'Respiratory/ICU', vibe: '临床表现与风险分层' },
       'mdt-pharm': { emoji: '💊', title_zh: '药学', title_en: 'Pharmacist', vibe: 'PK/PD 优化与用药安全' },
       'mdt-ic': { emoji: '🛡️', title_zh: '院感/公卫', title_en: 'Infection Control/Public Health', vibe: '耐药监测与群体责任' },
       'mdt-micro': { emoji: '🧫', title_zh: '微生物', title_en: 'Microbiology', vibe: '快速病原学证据与时间缩短' },
+      'mdt-scribe': { emoji: '📝', title_zh: '会诊秘书', title_en: 'Scribe', vibe: '纪要与过程追踪' },
       'human_clinician': { emoji: '👨‍⚕️', title_zh: '临床医生', title_en: 'Clinician', vibe: '病例提出者' },
     };
 
     const seats = [
+      { id: 'mdt-orchestrator', x: 50, y: 12, label_zh: '主持人', label_en: 'Host' },
       { id: 'mdt-id', x: 18, y: 28, label_zh: '感染科', label_en: 'ID' },
       { id: 'mdt-micro', x: 82, y: 28, label_zh: '微生物', label_en: 'Micro' },
       { id: 'mdt-pharm', x: 18, y: 72, label_zh: '药学', label_en: 'Pharm' },
       { id: 'mdt-icu', x: 82, y: 72, label_zh: '呼吸/重症', label_en: 'Resp/ICU' },
       { id: 'mdt-ic', x: 50, y: 88, label_zh: '院感/公卫', label_en: 'IC/PH' },
-      { id: 'human_clinician', x: 50, y: 50, label_zh: '临床输入', label_en: 'Clinical Input' },
+      { id: 'mdt-scribe', x: 65, y: 50, label_zh: '会诊秘书', label_en: 'Scribe' },
+      { id: 'human_clinician', x: 35, y: 50, label_zh: '临床输入', label_en: 'Clinical Input' },
     ];
     const seatState = new Map();
 
