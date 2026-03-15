@@ -9,8 +9,8 @@
     "feishu",
     "telegram"
   ],
-  "lastGlobalHeartbeatCheckAt": "2026-03-15T08:35:00+08:00",
-  "lastGlobalHeartbeatCheckResult": "status+probe: channels OK; gateway probe connect ok but RPC limited (missing operator.read); status still shows gateway unreachable due to missing operator.read scope. gateway restart command itself gets SIGTERM; needs investigation/repair.",
+  "lastGlobalHeartbeatCheckAt": "2026-03-15T09:05:00+08:00",
+  "lastGlobalHeartbeatCheckResult": "status recheck: channels OK; gateway still flagged unreachable due to missing scope operator.read. Cooldown active (<2h since lastGlobalAutoFixAt=08:04), so no cleanup/restart attempted.",
   "lastGlobalHeartbeatCheckChannels": [
     "telegram",
     "qqbot",
