@@ -153,6 +153,7 @@
     .report-card { border: 1px solid #2a375f; border-radius: 10px; padding: 10px; background: rgba(10,16,32,.7); margin-bottom: 10px; }
     .minutes-section { border: 1px solid #324069; border-radius: 10px; padding: 10px; margin-bottom: 10px; background: rgba(9,14,28,.78); }
     .minutes-section h5 { margin: 0 0 6px; font-size: 13px; color: #cfe0ff; }
+    .code-block { background: rgba(10,16,32,.7); border: 1px solid #2b3a62; border-radius: 8px; padding: 8px; color: #cfe0ff; white-space: pre-wrap; }
 
     .section-col { border: 1px solid #2a375f; border-radius: 10px; padding: 8px; background: #0f152a; min-height: 220px; }
     .section-col h4 { margin: 0 0 8px; font-size: 14px; color: #dce8ff; }
@@ -958,11 +959,15 @@
       const conflictNodes = new Set();
 
       currentCaseEvents.forEach(ev => {
-        if (ev.event_type === 'agent_opinion' || ev.event_type === 'agent_review') {
+        if (['agent_opinion','agent_review','lead_opinion','discussion_message'].includes(ev.event_type)) {
           speakerCounter[ev.speaker] = (speakerCounter[ev.speaker] || 0) + 1;
         }
         if (ev.event_type === 'consensus_updated') {
           const score = Number(ev?.payload?.consensus_score ?? ev?.payload?.confidence ?? ev?.confidence);
+          if (!Number.isNaN(score)) consensusSeries.push({ t: String(ev.timestamp || '').slice(11, 19), v: score });
+        }
+        if (ev.event_type === 'final_consensus') {
+          const score = Number(ev?.payload?.consensus_score ?? ev?.payload?.confidence ?? ev?.confidence ?? 1);
           if (!Number.isNaN(score)) consensusSeries.push({ t: String(ev.timestamp || '').slice(11, 19), v: score });
         }
         if (ev.event_type === 'agent_review') {
@@ -1115,24 +1120,30 @@
     }
 
     function renderMinutesContent(minutesWrap) {
-      const minutes = minutesWrap?.minutes;
+      const wrap = minutesWrap?.minutes ? minutesWrap : { minutes: minutesWrap };
+      const minutes = wrap?.minutes;
       if (!minutesBody || !minutesMeta) return;
       if (!minutes) {
         minutesBody.innerHTML = `<div class="empty-tip">${tr('minutesEmpty')}</div>`;
         minutesMeta.textContent = '-';
         return;
       }
-      currentMinutesData = minutesWrap;
+      currentMinutesData = wrap;
       const m = minutes.minutes || {};
       const basic = m.basic_info || {};
       const participants = (m.participants || []).map(p => `${p.speaker}${p.specialty ? ` (${p.specialty})` : ''} · n=${p.event_count ?? '-'}`);
-      minutesMeta.textContent = `${minutes.case_id} · fp=${minutes.content_fingerprint || '-'} · events=${minutes.source_event_count ?? '-'} · ${minutes.generated_at || '-'}`;
+      const metaCaseId = wrap.case_id || minutes.case_id || '-';
+      const metaFp = wrap.content_fingerprint || minutes.content_fingerprint || '-';
+      const metaEvents = wrap.source_event_count ?? minutes.source_event_count ?? '-';
+      const metaAt = wrap.generated_at || minutes.generated_at || '-';
+      minutesMeta.textContent = `${metaCaseId} · fp=${metaFp} · events=${metaEvents} · ${metaAt}`;
+      const patientSummaryPretty = JSON.stringify(basic.patient_summary || {}, null, 2);
       minutesBody.innerHTML = `
         <div class="minutes-section"><h5>${tr('minutesBasicInfo')}</h5>
           <div><b>case_id:</b> ${basic.case_id || '-'}</div>
           <div><b>status:</b> ${basic.case_status || '-'}</div>
           <div><b>${tr('clinicalQuestion')}:</b> ${basic.clinical_question || '-'}</div>
-          <div><b>${tr('patientSummary')}:</b> ${JSON.stringify(basic.patient_summary || {})}</div>
+          <div><b>${tr('patientSummary')}:</b><pre class="code-block">${patientSummaryPretty}</pre></div>
         </div>
         <div class="minutes-section"><h5>${tr('minutesKeyDisputes')}</h5>${listToHtml(m.key_disputes)}</div>
         <div class="minutes-section"><h5>${tr('minutesFinalConsensus')}</h5>${listToHtml(m.final_consensus)}</div>
@@ -1633,6 +1644,9 @@
         const id = tab.dataset.tab;
         document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
         document.getElementById(`view-${id}`).classList.add('active');
+        if (id === 'analytics') {
+          try { renderCharts(); } catch (_) {}
+        }
       };
     });
 
