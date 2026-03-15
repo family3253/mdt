@@ -1,15 +1,16 @@
 {
   "lastChecks": {},
   "lastMemoryMaintenance": "2026-03-13",
-  "lastGlobalAutoFixAt": "2026-03-15T02:40:00+08:00",
-  "lastGlobalAutoFixReason": "heartbeat check: openclaw status shows Gateway unreachable due to missing scope operator.read; attempted auto-fix",
-  "lastGlobalAutoFixResult": "openclaw sessions cleanup ok (entries -> 56); openclaw gateway restart exited code 1 (no stdout); post-check: gateway probe Connect ok but still limited (missing operator.read) and status still reports unreachable due to scope",
+  "lastGlobalAutoFixAt": "2026-03-15T08:04:00+08:00",
+  "lastGlobalAutoFixReason": "heartbeat: repeated gateway unreachable in status due to missing scope operator.read; attempted cleanup+restart after cooldown",
+  "lastGlobalAutoFixResult": "sessions cleanup ok; openclaw gateway restart aborted by SIGTERM (repeatable). Post-check at 08:35: gateway service running; gateway probe Connect ok but RPC limited (missing operator.read); status still flags unreachable due to scope. journalctl shows qqbot WS 4009 timeout then re-identified successfully.",
   "lastGlobalAutoFixChannels": [
     "qqbot",
-    "feishu"
+    "feishu",
+    "telegram"
   ],
-  "lastGlobalHeartbeatCheckAt": "2026-03-15T07:34:00+08:00",
-  "lastGlobalHeartbeatCheckResult": "status+probe recheck: gateway probe connect ok but RPC limited (missing operator.read). status still reports gateway unreachable due to scope. channels OK. doctor --repair confirmed gateway service entrypoint mismatch and system node missing; openclaw gateway restart attempt earlier got SIGTERM.",
+  "lastGlobalHeartbeatCheckAt": "2026-03-15T08:35:00+08:00",
+  "lastGlobalHeartbeatCheckResult": "status+probe: channels OK; gateway probe connect ok but RPC limited (missing operator.read); status still shows gateway unreachable due to missing operator.read scope. gateway restart command itself gets SIGTERM; needs investigation/repair.",
   "lastGlobalHeartbeatCheckChannels": [
     "telegram",
     "qqbot",
