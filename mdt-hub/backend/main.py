@@ -219,11 +219,13 @@ ws_manager = WSManager()
 
 
 DEFAULT_SPECIALIST_PROFILES = [
-    ("mdt-id", "infectious_disease", "感染来源+抗菌覆盖策略"),
-    ("mdt-micro", "microbiology", "病原/标本质量与耐药解释"),
-    ("mdt-pharm", "clinical_pharmacy", "剂量与肾功能分层，药物相互作用"),
-    ("mdt-icu", "icu", "重症风险分层与支持治疗窗口"),
-    ("mdt-evidence", "evidence", "指南与文献证据分级"),
+    ("mdt-id", "infectious_disease", "病原学证据与抗菌谱匹配"),
+    ("mdt-micro", "microbiology", "快速病原学证据与时间缩短"),
+    ("mdt-pharm", "clinical_pharmacy", "PK/PD优化与用药安全"),
+    ("mdt-icu", "respiratory_icu", "临床表现与风险分层"),
+    ("mdt-ic", "infection_control_public_health", "耐药监测与群体责任"),
+    ("mdt-orchestrator", "orchestrator", "会诊主持与流程统筹"),
+    ("mdt-scribe", "scribe", "会诊纪要与过程追踪"),
 ]
 
 ROLE_PROMPT_TEMPLATES = {
