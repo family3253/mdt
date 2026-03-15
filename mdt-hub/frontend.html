@@ -1114,7 +1114,17 @@
     }
 
     function listToHtml(items = []) {
-      const arr = (items || []).filter(x => String(x || '').trim());
+      let arr = [];
+      if (Array.isArray(items)) {
+        arr = items;
+      } else if (items && typeof items === 'object') {
+        arr = Object.entries(items).map(([k, v]) => `${k}: ${v}`);
+      } else if (typeof items === 'string') {
+        arr = [items];
+      } else if (items != null) {
+        arr = [String(items)];
+      }
+      arr = (arr || []).filter(x => String(x || '').trim());
       if (!arr.length) return `<div class="empty-tip">-</div>`;
       return `<ul class="report-list">${arr.map(x => `<li>${x}</li>`).join('')}</ul>`;
     }
