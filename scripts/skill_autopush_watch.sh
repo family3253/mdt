@@ -6,23 +6,9 @@ set -euo pipefail
 
 WORKSPACE_DIR="/home/chenyechao/.openclaw/workspace"
 WATCH_DIRS=(
-  "$WORKSPACE_DIR/skills/wenxian"
-  "$WORKSPACE_DIR/skills/mdrgnb-daily-push"
-  "$WORKSPACE_DIR/skills/pubmed-database"
-  "$WORKSPACE_DIR/skills/summarize"
-  "$WORKSPACE_DIR/skills/brave-search"
-  "$WORKSPACE_DIR/skills/tavily-search"
-  "$WORKSPACE_DIR/skills/multi-search-engine"
-  "$WORKSPACE_DIR/skills/playwright-scraper-skill"
-  "$WORKSPACE_DIR/skills/agent-browser"
-  "$WORKSPACE_DIR/skills/notion"
-  "$WORKSPACE_DIR/skills/gog"
-  "$WORKSPACE_DIR/skills/daily-digest"
-  "$WORKSPACE_DIR/skills/weekly-report-generator"
-  "$WORKSPACE_DIR/skills/find-skills"
-  "$WORKSPACE_DIR/skills/context-master"
-  "$WORKSPACE_DIR/skills/task-status"
-  "$WORKSPACE_DIR/skills/quadrants"
+  # Watch the whole skill directories so new academic skills auto-sync without editing this script.
+  "$WORKSPACE_DIR/skills"
+  "/home/chenyechao/.openclaw/skills"
 )
 
 PUSH_SCRIPT="$WORKSPACE_DIR/scripts/push_academic_skills_to_github.sh"
