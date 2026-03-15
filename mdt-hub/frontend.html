@@ -611,29 +611,26 @@
     };
 
     const AGENT_PERSONA = {
-      'mdt-orchestrator': { emoji: '🎯', title_zh: '会诊主持人', title_en: 'Orchestrator', vibe: '冷静统筹型' },
-      'mdt-id': { emoji: '🦠', title_zh: '感染科主任', title_en: 'ID Specialist', vibe: '耐药策略型' },
-      'mdt-micro': { emoji: '🧫', title_zh: '微生物专家', title_en: 'Microbiology', vibe: '证据谨慎型' },
-      'mdt-pharm': { emoji: '💊', title_zh: '临床药师', title_en: 'Clinical Pharmacist', vibe: '剂量精算型' },
-      'mdt-icu': { emoji: '🫀', title_zh: 'ICU医生', title_en: 'ICU Specialist', vibe: '高危监护型' },
-      'mdt-evidence': { emoji: '📚', title_zh: '循证秘书', title_en: 'Evidence Officer', vibe: '文献归纳型' },
-      'mdt-radiology': { emoji: '🩻', title_zh: '影像科医生', title_en: 'Radiology', vibe: '征象判读型' },
-      'mdt-lab': { emoji: '🧪', title_zh: '检验科医生', title_en: 'Lab Specialist', vibe: '指标趋势型' },
+      'mdt-id': { emoji: '🦠', title_zh: '感染科', title_en: 'ID Specialist', vibe: '病原学证据与抗菌谱匹配' },
+      'mdt-icu': { emoji: '🫁', title_zh: '呼吸/重症', title_en: 'Respiratory/ICU', vibe: '临床表现与风险分层' },
+      'mdt-pharm': { emoji: '💊', title_zh: '药学', title_en: 'Pharmacist', vibe: 'PK/PD 优化与用药安全' },
+      'mdt-ic': { emoji: '🛡️', title_zh: '院感/公卫', title_en: 'Infection Control/Public Health', vibe: '耐药监测与群体责任' },
+      'mdt-micro': { emoji: '🧫', title_zh: '微生物', title_en: 'Microbiology', vibe: '快速病原学证据与时间缩短' },
       'human_clinician': { emoji: '👨‍⚕️', title_zh: '临床医生', title_en: 'Clinician', vibe: '病例提出者' },
     };
 
     const seats = [
-      { id: 'mdt-orchestrator', x: 50, y: 12, label_zh: '主持人', label_en: 'Host' },
       { id: 'mdt-id', x: 18, y: 28, label_zh: '感染科', label_en: 'ID' },
       { id: 'mdt-micro', x: 82, y: 28, label_zh: '微生物', label_en: 'Micro' },
       { id: 'mdt-pharm', x: 18, y: 72, label_zh: '药学', label_en: 'Pharm' },
-      { id: 'mdt-icu', x: 82, y: 72, label_zh: 'ICU', label_en: 'ICU' },
-      { id: 'mdt-evidence', x: 50, y: 88, label_zh: '循证秘书', label_en: 'Evidence' },
+      { id: 'mdt-icu', x: 82, y: 72, label_zh: '呼吸/重症', label_en: 'Resp/ICU' },
+      { id: 'mdt-ic', x: 50, y: 88, label_zh: '院感/公卫', label_en: 'IC/PH' },
       { id: 'human_clinician', x: 50, y: 50, label_zh: '临床输入', label_en: 'Clinical Input' },
     ];
     const seatState = new Map();
 
     const SECTION_KEYS = ['imaging', 'labs', 'medications'];
+    const DEFAULT_ROUND1_TASK_TEMPLATE = '请先进一步明确诊断，结合切片复核原诊断是否准确，给出支持/反对证据、关键鉴别诊断、下一步最小必要检查。';
     const sectionPanelState = { imaging: [], labs: [], medications: [] };
 
     function renderRoom() {
@@ -852,6 +849,7 @@
       setStatusText(tr('switchedCase', { id: caseId }));
       clearCaseScopedState();
       clearReportView();
+      await loadCaseImportProfile();
       await loadLatestParsedSections();
       await loadEventsFallback();
     }
@@ -1056,6 +1054,7 @@
       const disputeList = (report.disputes || []).map(d => `<li>${d.round_no ?? '-'} / ${d.speaker || '-'}：${d.summary || ''}</li>`).join('') || `<li>${tr('reportEmpty')}</li>`;
       const convergenceList = (report.convergence_timeline || []).map(c => `<li>${c.round_no ?? '-'} · ${c.event_type || ''} · ${c.summary || ''} · score=${c.consensus_score ?? '-'} · conflicts=${c.open_conflicts ?? '-'}</li>`).join('') || `<li>${tr('reportEmpty')}</li>`;
       const finalConsensus = report.final_consensus || {};
+      const checklist = report.mdt_checklist || {};
       const actionItems = (report.action_items || []).map(a => `<li>${a}</li>`).join('') || `<li>${tr('reportEmpty')}</li>`;
 
       reportBody.innerHTML = `
@@ -1064,6 +1063,10 @@
           <div><b>${tr('clinicalQuestion')}</b> ${clinicalQuestion || '-'}</div>
           <div><b>${tr('summaryText')}</b> ${summaryText || '-'}</div>
           <div><b>${tr('patientSummary')}</b> ${JSON.stringify(patientSummary)}</div>
+          <div><b>source_case_url:</b> ${basic.source_case_url || '-'}</div>
+          <div><b>slide_urls:</b> ${(basic.slide_urls || []).join(' ; ') || '-'}</div>
+          <div><b>initial_diagnosis:</b> ${basic.initial_diagnosis || '-'}</div>
+          <div><b>round1_task_template:</b> ${basic.round1_task_template || '-'}</div>
         </div>
         <h4>${tr('expertOpinions')}</h4>
         ${opinionList}
@@ -1077,6 +1080,14 @@
           <div class="muted">score=${finalConsensus.consensus_score ?? '-'} · round=${finalConsensus.round_no ?? '-'} · ${finalConsensus.timestamp || '-'}</div>
           <div><b>${tr('actions')}</b> ${(finalConsensus.actions || []).join('；') || '-'}</div>
         </div>
+        <h4>MDT Checklist</h4>
+        <ul class="report-list">
+          <li>病例完整性: ${checklist.case_completeness || '-'}</li>
+          <li>影像/病理证据充分性: ${checklist.evidence_sufficiency || '-'}</li>
+          <li>鉴别诊断: ${checklist.differential_diagnosis || '-'}</li>
+          <li>共识等级: ${checklist.consensus_level || '-'}</li>
+          <li>执行与随访计划: ${checklist.execution_followup_plan || '-'}</li>
+        </ul>
         <h4>${tr('actionItems')}</h4>
         <ul class="report-list">${actionItems}</ul>
       `;
@@ -1116,6 +1127,7 @@
         <div class="minutes-section"><h5>${tr('minutesFinalConsensus')}</h5>${listToHtml(m.final_consensus)}</div>
         <div class="minutes-section"><h5>${tr('minutesExecution')}</h5>${listToHtml(m.execution_suggestions)}</div>
         <div class="minutes-section"><h5>${tr('minutesRiskFollowup')}</h5>${listToHtml(m.risks_and_followup)}</div>
+        <div class="minutes-section"><h5>MDT Checklist</h5>${listToHtml(m.mdt_checklist)}</div>
         <div class="minutes-section"><h5>${tr('minutesTimeline')}</h5>${listToHtml(m.timeline_summary)}</div>
         <div class="minutes-section"><h5>${tr('minutesParticipants')}</h5>${listToHtml(participants)}</div>
       `;
@@ -1305,10 +1317,21 @@
     async function submitDiscussion() {
       const caseId = document.getElementById('caseId').value.trim();
       const message = document.getElementById('msg').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
       if (!message) { setStatusText(tr('needQuestion')); return; }
       const confirmedSections = getConfirmedSectionsPayload();
       try {
-        await requestWithMeta('/cases/open', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({case_id: caseId, patient_summary: {note: 'interactive case'}}) });
+        await requestWithMeta('/cases/import', {
+          method: 'POST', headers: {'content-type': 'application/json'},
+          body: JSON.stringify({
+            case_id: caseId,
+            patient_summary: {note: 'interactive case'},
+            source_case_url: document.getElementById('sourceCaseUrl').value.trim() || null,
+            slide_urls: parseSlideUrlsText(),
+            initial_diagnosis: document.getElementById('initialDiagnosis').value.trim() || null,
+            round1_task_template: document.getElementById('round1TaskTemplate').value.trim() || DEFAULT_ROUND1_TASK_TEMPLATE,
+          })
+        });
         const { data } = await requestWithMeta('/discussion/submit', {
           method: 'POST', headers: {'content-type': 'application/json'},
           body: JSON.stringify({
@@ -1418,6 +1441,62 @@
         setStatusText(tr('feedFileOk', { id: agent_id }));
       } catch (e) {
         setStatusText(toErrorMessage(e, 'feedFileFail'));
+      }
+    }
+
+    function parseSlideUrlsText() {
+      return (document.getElementById('slideUrls').value || '')
+        .split(/\n+/)
+        .map(x => x.trim())
+        .filter(Boolean);
+    }
+
+    function applyCaseImportProfile(data = {}) {
+      document.getElementById('sourceCaseUrl').value = data.source_case_url || '';
+      document.getElementById('slideUrls').value = (data.slide_urls || []).join('\n');
+      document.getElementById('initialDiagnosis').value = data.initial_diagnosis || '';
+      document.getElementById('round1TaskTemplate').value = data.round1_task_template || DEFAULT_ROUND1_TASK_TEMPLATE;
+    }
+
+    async function saveCaseImportProfile() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      try {
+        const payload = {
+          case_id: caseId,
+          patient_summary: { note: 'interactive case import' },
+          source_case_url: document.getElementById('sourceCaseUrl').value.trim() || null,
+          slide_urls: parseSlideUrlsText(),
+          initial_diagnosis: document.getElementById('initialDiagnosis').value.trim() || null,
+          round1_task_template: document.getElementById('round1TaskTemplate').value.trim() || DEFAULT_ROUND1_TASK_TEMPLATE,
+          mdt_checklist: {
+            case_completeness: 'pending',
+            evidence_sufficiency: 'pending',
+            differential_diagnosis: 'pending',
+            consensus_level: 'pending',
+            execution_followup_plan: 'pending',
+          },
+        };
+        const { data } = await requestWithMeta('/cases/import', {
+          method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload)
+        });
+        applyCaseImportProfile(data);
+        setStatusText(tr('caseImportProfileSaved', { caseId: caseId }));
+        await refreshRecentCases();
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'caseImportProfileFail'));
+      }
+    }
+
+    async function loadCaseImportProfile() {
+      const caseId = document.getElementById('caseId').value.trim();
+      if (!caseId) { setStatusText(tr('needCaseId')); return; }
+      try {
+        const { data } = await requestWithMeta(`/cases/${caseId}/profile`);
+        applyCaseImportProfile(data || {});
+        setStatusText(tr('caseImportProfileLoaded', { caseId: caseId }));
+      } catch (e) {
+        setStatusText(toErrorMessage(e, 'caseImportProfileFail'));
       }
     }
 
@@ -1556,6 +1635,7 @@
       renderRoom();
       renderSectionPanel();
       updateDiagnostics();
+      document.getElementById('round1TaskTemplate').value = DEFAULT_ROUND1_TASK_TEMPLATE;
 
       setWsState(tr('wsInit'), 'warn');
       stopPollingFallback();
@@ -1566,6 +1646,7 @@
         const failed = results.filter(r => r.status === 'rejected').length;
         try { await loadAgents(); } catch (_) {}
         try { await refreshRecentCases(); } catch (_) {}
+        try { await loadCaseImportProfile(); } catch (_) {}
         try { await loadEventsFallback(); } catch (_) {}
         if (failed > 0) setStatusText(tr('initDonePartial'));
       });
