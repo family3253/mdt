@@ -126,8 +126,6 @@
     .btn-primary { background: linear-gradient(180deg, #2d4c9c 0%, #253f83 100%); border-color: #4d74d1; }
     .btn-secondary { background: #1a2341; border-color: #3a4f84; }
     .btn-ghost { background: rgba(18,28,54,.55); border-style: dashed; }
-    .btn-danger { background: rgba(239,68,68,.15); border-color: rgba(239,68,68,.45); color: #fecaca; }
-    .btn-danger:hover { border-color: rgba(239,68,68,.8); }
 
     .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
@@ -153,7 +151,6 @@
     .report-card { border: 1px solid #2a375f; border-radius: 10px; padding: 10px; background: rgba(10,16,32,.7); margin-bottom: 10px; }
     .minutes-section { border: 1px solid #324069; border-radius: 10px; padding: 10px; margin-bottom: 10px; background: rgba(9,14,28,.78); }
     .minutes-section h5 { margin: 0 0 6px; font-size: 13px; color: #cfe0ff; }
-    .code-block { background: rgba(10,16,32,.7); border: 1px solid #2b3a62; border-radius: 8px; padding: 8px; color: #cfe0ff; white-space: pre-wrap; }
 
     .section-col { border: 1px solid #2a375f; border-radius: 10px; padding: 8px; background: #0f152a; min-height: 220px; }
     .section-col h4 { margin: 0 0 8px; font-size: 14px; color: #dce8ff; }
@@ -271,10 +268,7 @@
           <button class="btn-primary" onclick="submitDiscussion()" data-i18n="submitDiscussion">提交讨论</button>
           <button class="btn-secondary" onclick="runReviewRound()" data-i18n="reviewRound">二轮互评</button>
         </div>
-        <div class="btn-row">
-          <button class="btn-ghost" onclick="loadConflictGraph()" data-i18n="refreshConflict">刷新冲突图</button>
-          <button class="btn-danger" onclick="clearCurrentCase()" data-i18n="clearCase">清空当前病例</button>
-        </div>
+        <button class="btn-ghost" onclick="loadConflictGraph()" data-i18n="refreshConflict">刷新冲突图</button>
       </div>
 
       <div class="panel">
@@ -424,7 +418,7 @@
       zh: {
         pageTitle: 'MDT 会诊控制台', headerTitle: 'MDT 控制台', wsConnecting: '连接中...', statusWaiting: '等待操作',
         diagTitle: '连接诊断', retryModels: '重试加载模型', retryAgents: '重试加载 Agent',
-        consultInput: '会诊输入', msgPlaceholder: '输入临床问题...', refreshCases: '刷新病例', useSelectedCase: '切换到所选病例', enableDocs: '启用病历直读上下文', submitDiscussion: '提交讨论', reviewRound: '二轮互评', refreshConflict: '刷新冲突图', clearCase: '清空当前病例',
+        consultInput: '会诊输入', msgPlaceholder: '输入临床问题...', refreshCases: '刷新病例', useSelectedCase: '切换到所选病例', enableDocs: '启用病历直读上下文', submitDiscussion: '提交讨论', reviewRound: '二轮互评', refreshConflict: '刷新冲突图',
         uploadCaseTitle: '上传病历（文件/网址）', sourceCaseUrlPlaceholder: '原始病例来源 URL', slideUrlsPlaceholder: '切片 URL（每行一个）', initialDiagnosisPlaceholder: '初始诊断', round1TaskTemplatePlaceholder: '首轮任务模板（可编辑）', saveImportProfile: '保存导入信息', loadImportProfile: '加载导入信息', caseDocUrlPlaceholder: '病历网址（支持网页/PDF链接）', importCaseUrl: '导入网址病历', uploadCaseFile: '上传病历文件',
         parsedPanelTitle: '病历解析结果面板（可编辑确认）', parsedPanelHint: '提交会诊前可确认/采纳影像、检验、用药条目',
         imaging: '影像', labs: '检验', medications: '用药', addImaging: '+ 新增影像条目', addLabs: '+ 新增检验条目', addMeds: '+ 新增用药条目',
@@ -444,7 +438,6 @@
         noParsedDoc: '当前病例暂无解析病历', loadedLatest: '已加载最近病历解析结果（文档ID {id}）', confirmSaved: '解析结果已确认写回（ID {id}）', loadFailed: '加载失败', confirmFailed: '确认写回失败', recentCasesEmpty: '暂无历史病例', recentCasesFail: '加载病例列表失败', switchedCase: '已切换病例：{id}',
         submitOk: '已提交讨论，生成 {count} 条响应（已带入确认条目 {picked} 条，病历上下文:{docsOn} 文档{docCount}份）', on: '开', off: '关', submitFail: '提交失败',
         reviewOk: '二轮互评完成，新增 {count} 条事件', reviewFail: '二轮互评失败',
-        clearCaseConfirm: '确认清空病例 {id} 吗？此操作不可恢复。', clearCaseDone: '已清空病例：{id}', clearCaseFail: '清空病例失败',
         addAgentOk: '已新增 {id}（模型: {model}）；推荐技能: {skills}', addFail: '新增失败', none: '无',
         modelMissingAgent: '模型配置失败：缺少 agent_id', modelUpdated: '已更新 {id} 模型为 {model}', modelUpdateFail: '模型更新失败',
         feedTextOk: '已给 {id} 注入文本知识', feedFail: '喂知识失败', feedUrlOk: '已给 {id} 注入网址知识', feedUrlFail: '网址注入失败',
@@ -468,7 +461,7 @@
       en: {
         pageTitle: 'MDT Consultation Console', headerTitle: 'MDT Console', wsConnecting: 'Connecting...', statusWaiting: 'Waiting for actions',
         diagTitle: 'Connectivity Diagnostics', retryModels: 'Retry Models', retryAgents: 'Retry Agents',
-        consultInput: 'Consultation Input', msgPlaceholder: 'Enter clinical question...', refreshCases: 'Refresh Cases', useSelectedCase: 'Switch to Selected Case', enableDocs: 'Enable direct EMR context', submitDiscussion: 'Submit Discussion', reviewRound: 'Round-2 Peer Review', refreshConflict: 'Refresh Conflict Graph', clearCase: 'Clear Current Case',
+        consultInput: 'Consultation Input', msgPlaceholder: 'Enter clinical question...', refreshCases: 'Refresh Cases', useSelectedCase: 'Switch to Selected Case', enableDocs: 'Enable direct EMR context', submitDiscussion: 'Submit Discussion', reviewRound: 'Round-2 Peer Review', refreshConflict: 'Refresh Conflict Graph',
         uploadCaseTitle: 'Upload Case Records (File/URL)', sourceCaseUrlPlaceholder: 'Source case URL', slideUrlsPlaceholder: 'Slide URLs (one per line)', initialDiagnosisPlaceholder: 'Initial diagnosis', round1TaskTemplatePlaceholder: 'Round-1 task template (editable)', saveImportProfile: 'Save import profile', loadImportProfile: 'Load import profile', caseDocUrlPlaceholder: 'Case URL (web/PDF supported)', importCaseUrl: 'Import URL Record', uploadCaseFile: 'Upload Case File',
         parsedPanelTitle: 'Parsed Case Panel (Editable Confirmation)', parsedPanelHint: 'Confirm/adopt imaging, labs and medication items before submission',
         imaging: 'Imaging', labs: 'Labs', medications: 'Medications', addImaging: '+ Add Imaging Item', addLabs: '+ Add Lab Item', addMeds: '+ Add Medication Item',
@@ -488,7 +481,6 @@
         noParsedDoc: 'No parsed case records found for this case', loadedLatest: 'Latest parsed record loaded (Doc ID {id})', confirmSaved: 'Parsed result confirmed and saved (ID {id})', loadFailed: 'Load failed', confirmFailed: 'Confirm save failed', recentCasesEmpty: 'No recent cases', recentCasesFail: 'Failed to load case list', switchedCase: 'Switched case: {id}',
         submitOk: 'Discussion submitted. {count} responses generated ({picked} confirmed items included, docs context:{docsOn} docs={docCount})', on: 'on', off: 'off', submitFail: 'Submit failed',
         reviewOk: 'Round-2 review complete, {count} events added', reviewFail: 'Round-2 review failed',
-        clearCaseConfirm: 'Confirm clearing case {id}? This cannot be undone.', clearCaseDone: 'Cleared case: {id}', clearCaseFail: 'Clear case failed',
         addAgentOk: 'Agent {id} created (model: {model}); suggested skills: {skills}', addFail: 'Create agent failed', none: 'none',
         modelMissingAgent: 'Model update failed: missing agent_id', modelUpdated: 'Updated {id} model to {model}', modelUpdateFail: 'Model update failed',
         feedTextOk: 'Injected text knowledge into {id}', feedFail: 'Knowledge feed failed', feedUrlOk: 'Injected URL knowledge into {id}', feedUrlFail: 'URL injection failed',
@@ -566,7 +558,7 @@
     const API_OVERRIDE = urlParams.get('api');
     const IS_LOCAL = ['127.0.0.1', 'localhost'].includes(BASE_HOST);
     const IS_FILE_SCHEME = PAGE_PROTO === 'file:';
-    const API = API_OVERRIDE || (IS_FILE_SCHEME ? 'http://127.0.0.1:8788' : `http://${BASE_HOST}:8788`);
+    const API = API_OVERRIDE || (IS_FILE_SCHEME ? 'http://127.0.0.1:8788' : `${PAGE_PROTO}//${location.host}`);
     const IS_BACKEND_ORIGIN = !API_OVERRIDE;
     const WS_BASE = API_OVERRIDE ? API_OVERRIDE.replace(/^http/i, WS_PROTO) : API.replace(/^http/i, WS_PROTO);
     const WS_URL = `${WS_BASE.replace(/\/$/, '')}/ws/events`;
@@ -620,12 +612,13 @@
 
     const AGENT_PERSONA = {
       'mdt-orchestrator': { emoji: '🎯', title_zh: '会诊主持人', title_en: 'Orchestrator', vibe: '冷静统筹型' },
-      'mdt-id': { emoji: '🦠', title_zh: '感染科', title_en: 'ID Specialist', vibe: '病原学证据与抗菌谱匹配' },
-      'mdt-icu': { emoji: '🫁', title_zh: '呼吸/重症', title_en: 'Respiratory/ICU', vibe: '临床表现与风险分层' },
-      'mdt-pharm': { emoji: '💊', title_zh: '药学', title_en: 'Pharmacist', vibe: 'PK/PD 优化与用药安全' },
-      'mdt-ic': { emoji: '🛡️', title_zh: '院感/公卫', title_en: 'Infection Control/Public Health', vibe: '耐药监测与群体责任' },
-      'mdt-micro': { emoji: '🧫', title_zh: '微生物', title_en: 'Microbiology', vibe: '快速病原学证据与时间缩短' },
-      'mdt-scribe': { emoji: '📝', title_zh: '会诊秘书', title_en: 'Scribe', vibe: '纪要与过程追踪' },
+      'mdt-id': { emoji: '🦠', title_zh: '感染科主任', title_en: 'ID Specialist', vibe: '耐药策略型' },
+      'mdt-micro': { emoji: '🧫', title_zh: '微生物专家', title_en: 'Microbiology', vibe: '证据谨慎型' },
+      'mdt-pharm': { emoji: '💊', title_zh: '临床药师', title_en: 'Clinical Pharmacist', vibe: '剂量精算型' },
+      'mdt-icu': { emoji: '🫀', title_zh: 'ICU医生', title_en: 'ICU Specialist', vibe: '高危监护型' },
+      'mdt-evidence': { emoji: '📚', title_zh: '循证秘书', title_en: 'Evidence Officer', vibe: '文献归纳型' },
+      'mdt-radiology': { emoji: '🩻', title_zh: '影像科医生', title_en: 'Radiology', vibe: '征象判读型' },
+      'mdt-lab': { emoji: '🧪', title_zh: '检验科医生', title_en: 'Lab Specialist', vibe: '指标趋势型' },
       'human_clinician': { emoji: '👨‍⚕️', title_zh: '临床医生', title_en: 'Clinician', vibe: '病例提出者' },
     };
 
@@ -634,10 +627,9 @@
       { id: 'mdt-id', x: 18, y: 28, label_zh: '感染科', label_en: 'ID' },
       { id: 'mdt-micro', x: 82, y: 28, label_zh: '微生物', label_en: 'Micro' },
       { id: 'mdt-pharm', x: 18, y: 72, label_zh: '药学', label_en: 'Pharm' },
-      { id: 'mdt-icu', x: 82, y: 72, label_zh: '呼吸/重症', label_en: 'Resp/ICU' },
-      { id: 'mdt-ic', x: 50, y: 88, label_zh: '院感/公卫', label_en: 'IC/PH' },
-      { id: 'mdt-scribe', x: 65, y: 50, label_zh: '会诊秘书', label_en: 'Scribe' },
-      { id: 'human_clinician', x: 35, y: 50, label_zh: '临床输入', label_en: 'Clinical Input' },
+      { id: 'mdt-icu', x: 82, y: 72, label_zh: 'ICU', label_en: 'ICU' },
+      { id: 'mdt-evidence', x: 50, y: 88, label_zh: '循证秘书', label_en: 'Evidence' },
+      { id: 'human_clinician', x: 50, y: 50, label_zh: '临床输入', label_en: 'Clinical Input' },
     ];
     const seatState = new Map();
 
@@ -959,15 +951,11 @@
       const conflictNodes = new Set();
 
       currentCaseEvents.forEach(ev => {
-        if (['agent_opinion','agent_review','lead_opinion','discussion_message'].includes(ev.event_type)) {
+        if (ev.event_type === 'agent_opinion' || ev.event_type === 'agent_review') {
           speakerCounter[ev.speaker] = (speakerCounter[ev.speaker] || 0) + 1;
         }
         if (ev.event_type === 'consensus_updated') {
           const score = Number(ev?.payload?.consensus_score ?? ev?.payload?.confidence ?? ev?.confidence);
-          if (!Number.isNaN(score)) consensusSeries.push({ t: String(ev.timestamp || '').slice(11, 19), v: score });
-        }
-        if (ev.event_type === 'final_consensus') {
-          const score = Number(ev?.payload?.consensus_score ?? ev?.payload?.confidence ?? ev?.confidence ?? 1);
           if (!Number.isNaN(score)) consensusSeries.push({ t: String(ev.timestamp || '').slice(11, 19), v: score });
         }
         if (ev.event_type === 'agent_review') {
@@ -1114,46 +1102,30 @@
     }
 
     function listToHtml(items = []) {
-      let arr = [];
-      if (Array.isArray(items)) {
-        arr = items;
-      } else if (items && typeof items === 'object') {
-        arr = Object.entries(items).map(([k, v]) => `${k}: ${v}`);
-      } else if (typeof items === 'string') {
-        arr = [items];
-      } else if (items != null) {
-        arr = [String(items)];
-      }
-      arr = (arr || []).filter(x => String(x || '').trim());
+      const arr = (items || []).filter(x => String(x || '').trim());
       if (!arr.length) return `<div class="empty-tip">-</div>`;
       return `<ul class="report-list">${arr.map(x => `<li>${x}</li>`).join('')}</ul>`;
     }
 
     function renderMinutesContent(minutesWrap) {
-      const wrap = minutesWrap?.minutes ? minutesWrap : { minutes: minutesWrap };
-      const minutes = wrap?.minutes;
+      const minutes = minutesWrap?.minutes;
       if (!minutesBody || !minutesMeta) return;
       if (!minutes) {
         minutesBody.innerHTML = `<div class="empty-tip">${tr('minutesEmpty')}</div>`;
         minutesMeta.textContent = '-';
         return;
       }
-      currentMinutesData = wrap;
+      currentMinutesData = minutesWrap;
       const m = minutes.minutes || {};
       const basic = m.basic_info || {};
       const participants = (m.participants || []).map(p => `${p.speaker}${p.specialty ? ` (${p.specialty})` : ''} · n=${p.event_count ?? '-'}`);
-      const metaCaseId = wrap.case_id || minutes.case_id || '-';
-      const metaFp = wrap.content_fingerprint || minutes.content_fingerprint || '-';
-      const metaEvents = wrap.source_event_count ?? minutes.source_event_count ?? '-';
-      const metaAt = wrap.generated_at || minutes.generated_at || '-';
-      minutesMeta.textContent = `${metaCaseId} · fp=${metaFp} · events=${metaEvents} · ${metaAt}`;
-      const patientSummaryPretty = JSON.stringify(basic.patient_summary || {}, null, 2);
+      minutesMeta.textContent = `${minutes.case_id} · fp=${minutes.content_fingerprint || '-'} · events=${minutes.source_event_count ?? '-'} · ${minutes.generated_at || '-'}`;
       minutesBody.innerHTML = `
         <div class="minutes-section"><h5>${tr('minutesBasicInfo')}</h5>
           <div><b>case_id:</b> ${basic.case_id || '-'}</div>
           <div><b>status:</b> ${basic.case_status || '-'}</div>
           <div><b>${tr('clinicalQuestion')}:</b> ${basic.clinical_question || '-'}</div>
-          <div><b>${tr('patientSummary')}:</b><pre class="code-block">${patientSummaryPretty}</pre></div>
+          <div><b>${tr('patientSummary')}:</b> ${JSON.stringify(basic.patient_summary || {})}</div>
         </div>
         <div class="minutes-section"><h5>${tr('minutesKeyDisputes')}</h5>${listToHtml(m.key_disputes)}</div>
         <div class="minutes-section"><h5>${tr('minutesFinalConsensus')}</h5>${listToHtml(m.final_consensus)}</div>
@@ -1395,20 +1367,6 @@
         await loadEventsFallback();
       } catch (e) {
         setStatusText(toErrorMessage(e, 'reviewFail'));
-      }
-    }
-
-    async function clearCurrentCase() {
-      const caseId = document.getElementById('caseId').value.trim();
-      if (!caseId) { setStatusText(tr('needCaseId')); return; }
-      if (!confirm(tr('clearCaseConfirm', { id: caseId }))) return;
-      try {
-        await requestWithMeta(`/cases/${caseId}`, { method: 'DELETE' });
-        setStatusText(tr('clearCaseDone', { id: caseId }));
-        await refreshRecentCases();
-        await loadEventsFallback();
-      } catch (e) {
-        setStatusText(toErrorMessage(e, 'clearCaseFail'));
       }
     }
 
@@ -1655,17 +1613,16 @@
         document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
         document.getElementById(`view-${id}`).classList.add('active');
         if (id === 'analytics') {
-          try { loadEventsFallback(); } catch (_) {}
           setTimeout(() => {
-            try { renderCharts(); } catch (_) {}
-            try { speakerChart.resize(); consensusChart.resize(); conflictChart.resize(); } catch (_) {}
-          }, 50);
+            try {
+              speakerChart.resize();
+              consensusChart.resize();
+              conflictChart.resize();
+              renderCharts();
+            } catch (_) {}
+          }, 0);
         }
       };
-    });
-
-    window.addEventListener('resize', () => {
-      try { speakerChart.resize(); consensusChart.resize(); conflictChart.resize(); } catch (_) {}
     });
 
     async function retryLoadModels() {
