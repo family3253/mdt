@@ -1,17 +1,11 @@
 {
-  "lastChecks": {},
-  "lastMemoryMaintenance": "2026-03-13",
-  "lastGlobalAutoFixAt": "2026-03-15T08:04:00+08:00",
-  "lastGlobalAutoFixReason": "heartbeat: repeated gateway unreachable in status due to missing scope operator.read; attempted cleanup+restart after cooldown",
-  "lastGlobalAutoFixResult": "sessions cleanup ok; openclaw gateway restart aborted by SIGTERM (repeatable). Post-check at 08:35: gateway service running; gateway probe Connect ok but RPC limited (missing operator.read); status still flags unreachable due to scope. journalctl shows qqbot WS 4009 timeout then re-identified successfully.",
+  "lastMemoryMaintenance": "2026-03-15",
+  "lastHeartbeatAt": "2026-03-16T12:03:18+08:00",
+  "lastHeartbeatResult": "auto-check: openclaw status OK; main tokens 20k/200k (10%); no gateway/delivery/announce timeout; no channel state issues observed",
+  "lastGlobalAutoFixAt": "2026-03-16T10:14:00+08:00",
+  "lastGlobalAutoFixReason": "gateway unreachable warning due to missing scope: operator.read (probe Connect ok => scope limited)",
+  "lastGlobalAutoFixResult": "ignored per HEARTBEAT exception; no cleanup/restart",
   "lastGlobalAutoFixChannels": [
-    "qqbot",
-    "feishu",
-    "telegram"
-  ],
-  "lastGlobalHeartbeatCheckAt": "2026-03-15T09:35:00+08:00",
-  "lastGlobalHeartbeatCheckResult": "status recheck: unchanged; channels OK; gateway still flagged unreachable due to missing scope operator.read. Cooldown active (no restart).",
-  "lastGlobalHeartbeatCheckChannels": [
     "telegram",
     "qqbot",
     "feishu"
