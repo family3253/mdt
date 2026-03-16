@@ -10,6 +10,38 @@ from pathlib import Path
 from typing import List, Dict, Tuple
 from urllib.parse import urlparse, parse_qs
 
+def maybe_update_aether(docker_compose_dir: str = "/home/chenyechao/Aether") -> dict:
+    """Best-effort update for Aether container (app only).
+
+    We avoid pulling docker.io base images due to network instability;
+    only pull ghcr app image and recreate app container.
+    """
+    import subprocess, time
+    result = {"attempted": True, "ok": False, "detail": ""}
+    try:
+        cmd = ["bash", "-lc", f"cd {docker_compose_dir} && docker compose pull app && docker compose up -d app"]
+        cp = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        out = (cp.stdout or "") + "\n" + (cp.stderr or "")
+        if cp.returncode != 0:
+            result["detail"] = out.strip()[-1200:]
+            return result
+        # wait health a bit
+        for _ in range(30):
+            st = subprocess.run(["bash","-lc","docker inspect $(docker ps -qf name=aether-app) --format '{{.State.Health.Status}}'"],
+                                capture_output=True,text=True).stdout.strip()
+            if st == 'healthy':
+                result["ok"] = True
+                result["detail"] = "aether-app healthy"
+                return result
+            time.sleep(2)
+        result["detail"] = "aether-app not healthy after wait"
+        return result
+    except Exception as e:
+        result["detail"] = f"exception: {type(e).__name__}: {e}"
+        return result
+
+
+
 import requests
 
 
