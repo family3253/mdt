@@ -1141,7 +1141,7 @@
       if (!caseId) { setStatusText(tr('needCaseId')); return; }
       try {
         const { data } = await requestWithMeta(`/cases/${caseId}/minutes`);
-        renderMinutesContent(data.minutes);
+        renderMinutesContent(data);
         setStatusText(tr('minutesGenerated'));
       } catch (e) {
         setStatusText(toErrorMessage(e, 'minutesLoadFail'));
