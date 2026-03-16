@@ -119,6 +119,33 @@ def get_gpt_keys(aether_base: str, token: str, provider_id: str, page_size: int 
     return out
 
 
+def load_ban_list(path: str) -> set:
+    p = Path(path)
+    if not p.exists():
+        return set()
+    out = set()
+    for line in p.read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        out.add(s)
+    return out
+
+
+def append_ban_list(path: str, emails: List[str]) -> None:
+    if not emails:
+        return
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    existing = load_ban_list(path)
+    new = [e for e in emails if e and e not in existing]
+    if not new:
+        return
+    with p.open("a", encoding="utf-8") as f:
+        for e in new:
+            f.write(e + "\n")
+
+
 def list_cpa_codex_tokens(cpa_base: str, mgmt_key: str) -> List[Dict]:
     h = {"Authorization": f"Bearer {mgmt_key}"}
     r = requests.get(f"{cpa_base}/v0/management/auth-files", headers=h, timeout=60)
@@ -306,6 +333,7 @@ def main():
     ap.add_argument("--provider-id", required=True)
     ap.add_argument("--target-keys", type=int, default=30)
     ap.add_argument("--protect-list", default="/home/chenyechao/.openclaw/workspace/configs/aether-gpt-protect-list.txt")
+    ap.add_argument("--ban-list", default="/home/chenyechao/.openclaw/workspace/configs/aether-gpt-ban-list.txt", help="Emails to skip when selecting CPA refresh tokens (e.g. refresh_token_reused).")
     ap.add_argument("--proxy-node-id", default="")
     ap.add_argument("--safe", action="store_true", help="safe mode: no deletion, capped import")
     ap.add_argument("--update-aether", action="store_true", help="Before maintenance, best-effort update Aether app container (pull ghcr app only).")
@@ -338,6 +366,9 @@ def main():
 
     protect = load_protect_list(args.protect_list)
     summary["protect_count"] = len(protect)
+
+    ban = load_ban_list(args.ban_list)
+    summary["ban_count"] = len(ban)
 
     cleanup_candidates = []
     for k in keys_before:
@@ -437,7 +468,25 @@ def main():
             "failed": body.get("failed", 0),
             "top_errors": sorted(errs.items(), key=lambda x: x[1], reverse=True)[:5],
         }
-    summary["import"] = import_result
+    summary["import"] = import_res
+
+    # Auto-ban accounts whose refresh tokens are reported as reused.
+    # This improves future success rate by skipping known-bad sources.
+    try:
+        reused = []
+        results = (import_res.get('body') or {}).get('results') or []
+        for it in results:
+            if str(it.get('status')) != 'success' and 'refresh_token_reused' in str(it.get('error') or ''):
+                i = int(it.get('index')) if str(it.get('index')).isdigit() else None
+                if i is not None and 0 <= i < len(selected):
+                    reused.append((selected[i].get('email') or '').strip())
+        reused = [e for e in reused if e]
+        if reused and not args.dry_run:
+            append_ban_list(args.ban_list, reused)
+        summary['ban_added_reused'] = len(reused)
+    except Exception as e:
+        summary['ban_added_reused_error'] = f"{type(e).__name__}: {e}"
+
 
     keys_after = get_gpt_keys(args.aether_base, token, args.provider_id)
     summary["after_key_count"] = len(keys_after)
