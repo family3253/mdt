@@ -1,7 +1,7 @@
 {
   "lastMemoryMaintenance": "2026-03-15",
-  "lastHeartbeatAt": "2026-03-16T12:36:00+08:00",
-  "lastHeartbeatResult": "auto-check: openclaw status OK; main tokens 23k/200k (11%); no gateway/delivery/announce timeout; no channel state issues observed",
+  "lastHeartbeatAt": "2026-03-16T12:41:00+08:00",
+  "lastHeartbeatResult": "auto-check: openclaw status OK; main 21k/200k (10%); telegram direct 146k/200k (73%, below 75% threshold); no cleanup/restart",
   "lastGlobalAutoFixAt": "2026-03-16T10:14:00+08:00",
   "lastGlobalAutoFixReason": "gateway unreachable warning due to missing scope: operator.read (probe Connect ok => scope limited)",
   "lastGlobalAutoFixResult": "ignored per HEARTBEAT exception; no cleanup/restart",
