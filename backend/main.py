@@ -138,6 +138,33 @@ class ConflictResolutionInput(BaseModel):
     max_actions_per_conflict: int = Field(default=3, ge=1, le=3)
 
 
+class MedicationOrder(BaseModel):
+    drug: str
+    dose: Optional[str] = None
+    route: Optional[str] = None
+    frequency: Optional[str] = None
+    duration: Optional[str] = None
+    indication: Optional[str] = None
+
+
+class PrescriptionScenario(BaseModel):
+    medications: list[MedicationOrder] = Field(default_factory=list)
+    labs: dict[str, Any] = Field(default_factory=dict)
+    vitals: dict[str, Any] = Field(default_factory=dict)
+    conditions: list[str] = Field(default_factory=list)
+    allergies: list[str] = Field(default_factory=list)
+    notes: Optional[str] = None
+
+
+class InterventionInput(BaseModel):
+    case_id: str
+    round_no: int = Field(default=1, ge=1)
+    scenario: PrescriptionScenario
+    source_event_ids: list[int] = Field(default_factory=list)
+    requested_by: str = "mdt-clinician"
+    extra_context: Optional[str] = None
+
+
 class KnowledgeFeed(BaseModel):
     content: str
     source: str = "manual"
@@ -219,11 +246,13 @@ ws_manager = WSManager()
 
 
 DEFAULT_SPECIALIST_PROFILES = [
-    ("mdt-id", "infectious_disease", "感染来源+抗菌覆盖策略"),
-    ("mdt-micro", "microbiology", "病原/标本质量与耐药解释"),
-    ("mdt-pharm", "clinical_pharmacy", "剂量与肾功能分层，药物相互作用"),
-    ("mdt-icu", "icu", "重症风险分层与支持治疗窗口"),
-    ("mdt-evidence", "evidence", "指南与文献证据分级"),
+    ("mdt-id", "infectious_disease", "病原学证据与抗菌谱匹配"),
+    ("mdt-micro", "microbiology", "快速病原学证据与时间缩短"),
+    ("mdt-pharm", "clinical_pharmacy", "PK/PD优化与用药安全"),
+    ("mdt-icu", "respiratory_icu", "临床表现与风险分层"),
+    ("mdt-ic", "infection_control_public_health", "耐药监测与群体责任"),
+    ("mdt-orchestrator", "orchestrator", "会诊主持与流程统筹"),
+    ("mdt-scribe", "scribe", "会诊纪要与过程追踪"),
 ]
 
 ROLE_PROMPT_TEMPLATES = {
@@ -338,6 +367,52 @@ def init_db() -> None:
               confirmed_by text,
               created_at text not null,
               updated_at text not null
+            )
+            """
+        )
+        c.execute(
+            """
+            create table if not exists mdt_conflicts (
+              conflict_id text primary key,
+              case_id text not null,
+              round_no integer not null,
+              dispute_point text not null,
+              involved_experts text not null,
+              evidence_diff text,
+              priority text not null,
+              confidence real,
+              source_event_id integer,
+              trace_event_ids text,
+              status text not null,
+              created_at text not null,
+              resolved_at text
+            )
+            """
+        )
+        c.execute(
+            """
+            create table if not exists mdt_interventions (
+              intervention_id text primary key,
+              case_id text not null,
+              round_no integer not null,
+              scenario text not null,
+              conflict_ids text not null,
+              recommendations text not null,
+              status text not null,
+              requested_by text,
+              created_at text not null
+            )
+            """
+        )
+        c.execute(
+            """
+            create table if not exists mdt_trace_events (
+              trace_id text primary key,
+              case_id text not null,
+              event_type text not null,
+              payload text not null,
+              source_event_ids text,
+              created_at text not null
             )
             """
         )
@@ -839,6 +914,169 @@ def _load_case_events(case_id: str) -> list[dict[str, Any]]:
     return events
 
 
+def _record_conflicts(case_id: str, conflicts: list[dict[str, Any]]) -> dict[str, Any]:
+    if not conflicts:
+        return {"stored": 0, "trace_id": None}
+    now = datetime.now(timezone.utc).isoformat()
+    stored = 0
+    with conn() as c:
+        for cf in conflicts:
+            conflict_id = str(cf.get("conflict_id") or uuid.uuid4().hex)
+            round_no = int(cf.get("round_no") or 0)
+            involved = json.dumps(cf.get("involved_experts") or [], ensure_ascii=False)
+            trace_ids = json.dumps(cf.get("source_event_ids") or [], ensure_ascii=False)
+            c.execute(
+                """
+                insert or replace into mdt_conflicts(
+                  conflict_id, case_id, round_no, dispute_point, involved_experts,
+                  evidence_diff, priority, confidence, source_event_id, trace_event_ids,
+                  status, created_at, resolved_at
+                ) values (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    conflict_id,
+                    case_id,
+                    round_no,
+                    cf.get("dispute_point") or "",
+                    involved,
+                    cf.get("evidence_diff"),
+                    cf.get("priority") or "medium",
+                    cf.get("confidence"),
+                    cf.get("event_id"),
+                    trace_ids,
+                    "open",
+                    now,
+                    None,
+                ),
+            )
+            stored += 1
+    trace_id = uuid.uuid4().hex
+    payload = {
+        "conflicts": [c.get("conflict_id") for c in conflicts],
+        "count": stored,
+    }
+    _persist_trace_event(case_id, "conflicts_recorded", payload, [c.get("event_id") for c in conflicts if c.get("event_id")])
+    return {"stored": stored, "trace_id": trace_id}
+
+
+def _scenario_signature(scenario: dict[str, Any]) -> str:
+    raw = json.dumps(scenario, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def _evaluate_scenario_risks(scenario: dict[str, Any]) -> list[dict[str, Any]]:
+    risks: list[dict[str, Any]] = []
+    meds = scenario.get("medications") or []
+    labs = scenario.get("labs") or {}
+    conditions = [str(c).lower() for c in (scenario.get("conditions") or [])]
+    allergies = [str(a).lower() for a in (scenario.get("allergies") or [])]
+
+    for m in meds:
+        drug = str(m.get("drug") or "").lower()
+        if not drug:
+            continue
+        if any(x in drug for x in ["aminoglycoside", "阿米卡", "庆大", "阿米"]):
+            if labs.get("creatinine") or labs.get("egfr"):
+                risks.append({
+                    "type": "nephrotoxicity",
+                    "severity": "high",
+                    "detail": "存在肾功能指标异常时使用氨基糖苷类需谨慎，建议TDM与剂量调整。",
+                    "driver": drug,
+                })
+        if any(x in drug for x in ["vancomycin", "万古", "linezolid", "利奈"]):
+            risks.append({
+                "type": "therapeutic_monitoring",
+                "severity": "medium",
+                "detail": "该药物需要治疗药物监测或血象监测，避免过量或骨髓抑制。",
+                "driver": drug,
+            })
+        if any(x in drug for x in ["carbapenem", "美罗培南", "亚胺培南"]):
+            risks.append({
+                "type": "resistance_pressure",
+                "severity": "medium",
+                "detail": "碳青霉烯类建议结合病原学证据与耐药谱，避免过度覆盖。",
+                "driver": drug,
+            })
+
+    for cond in conditions:
+        if "shock" in cond or "休克" in cond:
+            risks.append({
+                "type": "hemodynamic_instability",
+                "severity": "high",
+                "detail": "存在休克风险，所有干预需同步血流动力学监测与支持方案。",
+                "driver": cond,
+            })
+
+    for allergy in allergies:
+        if any(x in allergy for x in ["beta", "青霉", "头孢"]):
+            risks.append({
+                "type": "allergy",
+                "severity": "high",
+                "detail": "存在β-内酰胺类过敏史，需准备替代方案并强化监测。",
+                "driver": allergy,
+            })
+
+    if not risks:
+        risks.append({
+            "type": "general",
+            "severity": "low",
+            "detail": "未发现明显高危用药信号，仍需根据最新检查动态评估。",
+        })
+    return risks
+
+
+def _build_intervention_recommendations(conflicts: list[dict[str, Any]], risks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    recommendations: list[dict[str, Any]] = []
+    for cf in conflicts:
+        rec = {
+            "conflict_id": cf.get("conflict_id"),
+            "priority": cf.get("priority", "medium"),
+            "dispute_point": cf.get("dispute_point"),
+            "actions": _build_resolution_actions(cf, 3),
+            "trace_event_ids": cf.get("source_event_ids") or [],
+        }
+        recommendations.append(rec)
+    return {
+        "conflict_recommendations": recommendations,
+        "scenario_risks": risks,
+    }
+
+
+def _persist_intervention(case_id: str, round_no: int, scenario: dict[str, Any], conflicts: list[dict[str, Any]], recommendations: dict[str, Any], requested_by: str) -> dict[str, Any]:
+    intervention_id = uuid.uuid4().hex
+    now = datetime.now(timezone.utc).isoformat()
+    with conn() as c:
+        c.execute(
+            """
+            insert into mdt_interventions(
+              intervention_id, case_id, round_no, scenario, conflict_ids, recommendations, status, requested_by, created_at
+            ) values (?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                intervention_id,
+                case_id,
+                round_no,
+                json.dumps(scenario, ensure_ascii=False),
+                json.dumps([c.get("conflict_id") for c in conflicts], ensure_ascii=False),
+                json.dumps(recommendations, ensure_ascii=False),
+                "generated",
+                requested_by,
+                now,
+            ),
+        )
+    return {
+        "intervention_id": intervention_id,
+        "case_id": case_id,
+        "round_no": round_no,
+        "scenario": scenario,
+        "conflicts": conflicts,
+        "recommendations": recommendations,
+        "status": "generated",
+        "requested_by": requested_by,
+        "created_at": now,
+    }
+
+
 def _normalize_slide_urls(urls: list[str]) -> list[str]:
     out: list[str] = []
     seen = set()
@@ -849,6 +1087,34 @@ def _normalize_slide_urls(urls: list[str]) -> list[str]:
         seen.add(u)
         out.append(u)
     return out
+
+
+def _persist_trace_event(case_id: str, event_type: str, payload: dict[str, Any], source_event_ids: Optional[list[int]] = None) -> dict[str, Any]:
+    trace_id = uuid.uuid4().hex
+    now = datetime.now(timezone.utc).isoformat()
+    with conn() as c:
+        c.execute(
+            """
+            insert into mdt_trace_events(trace_id, case_id, event_type, payload, source_event_ids, created_at)
+            values (?,?,?,?,?,?)
+            """,
+            (
+                trace_id,
+                case_id,
+                event_type,
+                json.dumps(payload, ensure_ascii=False),
+                json.dumps(source_event_ids or [], ensure_ascii=False),
+                now,
+            ),
+        )
+    return {
+        "trace_id": trace_id,
+        "case_id": case_id,
+        "event_type": event_type,
+        "payload": payload,
+        "source_event_ids": source_event_ids or [],
+        "created_at": now,
+    }
 
 
 def _normalize_mdt_checklist(raw: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -2132,6 +2398,7 @@ def _derive_conflict_items(case_id: str, conflict_graph: Optional[dict[str, Any]
                 "priority": priority,
                 "confidence": confidence,
                 "event_id": r["event_id"],
+                "source_event_ids": [int(r["event_id"])],
             }
         )
 
@@ -2159,6 +2426,7 @@ def _derive_conflict_items(case_id: str, conflict_graph: Optional[dict[str, Any]
                 "priority": "medium",
                 "confidence": 0.7,
                 "event_id": r["event_id"],
+                "source_event_ids": [int(r["event_id"])],
             }
         )
 
@@ -2181,12 +2449,23 @@ def _build_resolution_actions(conflict: dict[str, Any], max_actions: int = 3) ->
     secondary_owner = involved[1] if len(involved) > 1 else "mdt-orchestrator"
     dispute_point = conflict.get("dispute_point") or "冲突点"
     evidence_diff = conflict.get("evidence_diff") or "证据口径不一致"
+    priority = (conflict.get("priority") or "medium").lower()
+
+    if priority == "high":
+        deadline = "6h"
+        guardrail = "immediate"
+    elif priority == "low":
+        deadline = "48h"
+        guardrail = "24h"
+    else:
+        deadline = "24h"
+        guardrail = "immediate"
 
     candidates = [
         {
             "action_type": "collect_evidence",
             "owner": secondary_owner,
-            "deadline_hint": "24h",
+            "deadline_hint": deadline,
             "rationale": f"围绕“{dispute_point}”补齐关键证据，缩小分歧：{evidence_diff}",
         },
         {
@@ -2198,7 +2477,7 @@ def _build_resolution_actions(conflict: dict[str, Any], max_actions: int = 3) ->
         {
             "action_type": "execute_guardrail_plan",
             "owner": primary_owner,
-            "deadline_hint": "immediate",
+            "deadline_hint": guardrail,
             "rationale": "在最终裁决前执行低风险保护性动作，避免等待导致病情窗口丢失。",
         },
     ]
@@ -2275,6 +2554,7 @@ def generate_conflict_resolution(case_id: str, payload: ConflictResolutionInput)
     priority_rank = {"high": 3, "medium": 2, "low": 1}
     global_priority = max((cf.get("priority", "medium") for cf in conflicts), key=lambda x: priority_rank.get(x, 0))
     global_confidence = round(sum([float(cf.get("confidence", 0.7)) for cf in conflicts]) / max(len(conflicts), 1), 3)
+    trace = _record_conflicts(case_id, conflicts)
 
     return {
         "case_id": case_id,
@@ -2284,12 +2564,131 @@ def generate_conflict_resolution(case_id: str, payload: ConflictResolutionInput)
         "recommendations": recommendations,
         "priority": global_priority,
         "confidence": global_confidence,
+        "trace": trace,
         "meta": {
             "conflict_count": len(conflicts),
             "input_edge_count": len((graph or {}).get("edges") or []),
             "extra_context_used": bool((payload.extra_context or "").strip()),
         },
     }
+
+
+@app.post("/cases/{case_id}/interventions")
+def generate_interventions(case_id: str, payload: InterventionInput) -> dict[str, Any]:
+    _ensure_case(case_id)
+    if payload.case_id != case_id:
+        raise HTTPException(status_code=400, detail="case_id mismatch")
+
+    conflicts = _derive_conflict_items(case_id)
+    if not conflicts:
+        return {
+            "case_id": case_id,
+            "has_conflict": False,
+            "message": "未检测到冲突，无需生成协同干预。",
+            "intervention": None,
+        }
+
+    scenario = payload.scenario.model_dump(mode="json")
+    scenario_signature = _scenario_signature(scenario)
+    scenario_risks = _evaluate_scenario_risks(scenario)
+    recommendations = _build_intervention_recommendations(conflicts, scenario_risks)
+    intervention = _persist_intervention(case_id, payload.round_no, scenario, conflicts, recommendations, payload.requested_by)
+
+    event = MDTEvent(
+        case_id=case_id,
+        round_no=payload.round_no,
+        event_type="intervention_generated",
+        speaker="mdt-orchestrator",
+        specialty="mdt",
+        payload={
+            "scenario_signature": scenario_signature,
+            "scenario": scenario,
+            "scenario_risks": scenario_risks,
+            "conflicts": conflicts,
+            "recommendations": recommendations,
+            "intervention_id": intervention.get("intervention_id"),
+        },
+        confidence=0.78,
+    )
+    body, sentences = _persist_event_with_sentences(event)
+    _persist_trace_event(case_id, "intervention_generated", {
+        "intervention_id": intervention.get("intervention_id"),
+        "scenario_signature": scenario_signature,
+        "conflict_ids": [c.get("conflict_id") for c in conflicts],
+    }, payload.source_event_ids)
+    _record_conflicts(case_id, conflicts)
+
+    return {
+        "case_id": case_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "has_conflict": True,
+        "intervention": intervention,
+        "scenario_signature": scenario_signature,
+        "scenario_risks": scenario_risks,
+        "recommendations": recommendations,
+        "event": body,
+    }
+
+
+@app.get("/cases/{case_id}/interventions")
+def list_case_interventions(case_id: str, limit: int = 20) -> dict[str, Any]:
+    _ensure_case(case_id)
+    cap = max(1, min(int(limit or 20), 100))
+    with conn() as c:
+        rows = c.execute(
+            """
+            select intervention_id, round_no, scenario, conflict_ids, recommendations, status, requested_by, created_at
+            from mdt_interventions
+            where case_id=?
+            order by created_at desc
+            limit ?
+            """,
+            (case_id, cap),
+        ).fetchall()
+    items = []
+    for r in rows:
+        items.append(
+            {
+                "intervention_id": r["intervention_id"],
+                "round_no": r["round_no"],
+                "scenario": json.loads(r["scenario"] or "{}"),
+                "conflict_ids": json.loads(r["conflict_ids"] or "[]"),
+                "recommendations": json.loads(r["recommendations"] or "{}"),
+                "status": r["status"],
+                "requested_by": r["requested_by"],
+                "created_at": r["created_at"],
+            }
+        )
+    return {"case_id": case_id, "count": len(items), "interventions": items}
+
+
+@app.get("/cases/{case_id}/traces")
+def list_case_traces(case_id: str, limit: int = 50) -> dict[str, Any]:
+    _ensure_case(case_id)
+    cap = max(1, min(int(limit or 50), 200))
+    with conn() as c:
+        rows = c.execute(
+            """
+            select trace_id, event_type, payload, source_event_ids, created_at
+            from mdt_trace_events
+            where case_id=?
+            order by created_at desc
+            limit ?
+            """,
+            (case_id, cap),
+        ).fetchall()
+    traces = []
+    for r in rows:
+        traces.append(
+            {
+                "trace_id": r["trace_id"],
+                "event_type": r["event_type"],
+                "payload": json.loads(r["payload"] or "{}"),
+                "source_event_ids": json.loads(r["source_event_ids"] or "[]"),
+                "created_at": r["created_at"],
+            }
+        )
+    return {"case_id": case_id, "count": len(traces), "traces": traces}
 
 
 @app.get("/cases/{case_id}/events")
