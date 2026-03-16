@@ -468,13 +468,14 @@ def main():
             "failed": body.get("failed", 0),
             "top_errors": sorted(errs.items(), key=lambda x: x[1], reverse=True)[:5],
         }
-    summary["import"] = import_res
+    summary["import"] = import_result
 
     # Auto-ban accounts whose refresh tokens are reported as reused.
     # This improves future success rate by skipping known-bad sources.
     try:
         reused = []
-        results = (import_res.get('body') or {}).get('results') or []
+        # Use raw API response body to map errors back to selected accounts
+        results = (r.get('body') or {}).get('results') or []
         for it in results:
             if str(it.get('status')) != 'success' and 'refresh_token_reused' in str(it.get('error') or ''):
                 i = int(it.get('index')) if str(it.get('index')).isdigit() else None
