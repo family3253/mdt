@@ -1108,18 +1108,17 @@
     }
 
     function renderMinutesContent(minutesWrap) {
-      const minutes = minutesWrap?.minutes;
       if (!minutesBody || !minutesMeta) return;
-      if (!minutes) {
+      if (!minutesWrap || !minutesWrap.minutes) {
         minutesBody.innerHTML = `<div class="empty-tip">${tr('minutesEmpty')}</div>`;
         minutesMeta.textContent = '-';
         return;
       }
       currentMinutesData = minutesWrap;
-      const m = minutes.minutes || {};
+      const m = minutesWrap.minutes || {};
       const basic = m.basic_info || {};
       const participants = (m.participants || []).map(p => `${p.speaker}${p.specialty ? ` (${p.specialty})` : ''} · n=${p.event_count ?? '-'}`);
-      minutesMeta.textContent = `${minutes.case_id} · fp=${minutes.content_fingerprint || '-'} · events=${minutes.source_event_count ?? '-'} · ${minutes.generated_at || '-'}`;
+      minutesMeta.textContent = `${minutesWrap.case_id} · fp=${minutesWrap.content_fingerprint || '-'} · events=${minutesWrap.source_event_count ?? '-'} · ${minutesWrap.generated_at || '-'}`;
       minutesBody.innerHTML = `
         <div class="minutes-section"><h5>${tr('minutesBasicInfo')}</h5>
           <div><b>case_id:</b> ${basic.case_id || '-'}</div>
