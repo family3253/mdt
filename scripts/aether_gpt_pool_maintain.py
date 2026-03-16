@@ -308,6 +308,7 @@ def main():
     ap.add_argument("--protect-list", default="/home/chenyechao/.openclaw/workspace/configs/aether-gpt-protect-list.txt")
     ap.add_argument("--proxy-node-id", default="")
     ap.add_argument("--safe", action="store_true", help="safe mode: no deletion, capped import")
+    ap.add_argument("--update-aether", action="store_true", help="Before maintenance, best-effort update Aether app container (pull ghcr app only).")
     ap.add_argument("--import-limit", type=int, default=20)
     ap.add_argument("--cleanup-limit", type=int, default=20)
     ap.add_argument("--oauth-callback-url", default="", help="manual callback url captured after browser oauth")
@@ -318,11 +319,17 @@ def main():
     ap.add_argument("--log-file", default="/home/chenyechao/.openclaw/workspace/memory/aether-maintain-last.json")
     args = ap.parse_args()
 
+    # Optional: update Aether app container before any maintenance work
+    update_result = None
+    if getattr(args, "update_aether", False) and not args.dry_run:
+        update_result = maybe_update_aether()
+
     summary = {
         "time": now_iso(),
         "mode": {"dry_run": args.dry_run, "safe": args.safe},
         "provider_id": args.provider_id,
         "proxy_node_id": args.proxy_node_id or None,
+        "aether_update": update_result,
     }
 
     token = aether_login(args.aether_base, args.aether_email, args.aether_password, args.aether_token or None)
