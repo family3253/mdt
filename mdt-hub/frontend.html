@@ -1107,18 +1107,25 @@
       return `<ul class="report-list">${arr.map(x => `<li>${x}</li>`).join('')}</ul>`;
     }
 
+    function normalizeMinutesWrap(payload) {
+      if (!payload) return null;
+      if (payload.minutes && payload.minutes.minutes) return payload.minutes;
+      return payload;
+    }
+
     function renderMinutesContent(minutesWrap) {
       if (!minutesBody || !minutesMeta) return;
-      if (!minutesWrap || !minutesWrap.minutes) {
+      const wrap = normalizeMinutesWrap(minutesWrap);
+      if (!wrap || !wrap.minutes) {
         minutesBody.innerHTML = `<div class="empty-tip">${tr('minutesEmpty')}</div>`;
         minutesMeta.textContent = '-';
         return;
       }
-      currentMinutesData = minutesWrap;
-      const m = minutesWrap.minutes || {};
+      currentMinutesData = wrap;
+      const m = wrap.minutes || {};
       const basic = m.basic_info || {};
       const participants = (m.participants || []).map(p => `${p.speaker}${p.specialty ? ` (${p.specialty})` : ''} · n=${p.event_count ?? '-'}`);
-      minutesMeta.textContent = `${minutesWrap.case_id} · fp=${minutesWrap.content_fingerprint || '-'} · events=${minutesWrap.source_event_count ?? '-'} · ${minutesWrap.generated_at || '-'}`;
+      minutesMeta.textContent = `${wrap.case_id} · fp=${wrap.content_fingerprint || '-'} · events=${wrap.source_event_count ?? '-'} · ${wrap.generated_at || '-'}`;
       minutesBody.innerHTML = `
         <div class="minutes-section"><h5>${tr('minutesBasicInfo')}</h5>
           <div><b>case_id:</b> ${basic.case_id || '-'}</div>
